@@ -15,7 +15,15 @@ results/<experiment>/[<attempt>@]<commit>[-dirty_<patch_hash>]/
         data.csv
         meta.json
 ```
-> `attempt` is meant to be set by the user and has no bearing on any functionality provided by this package.
+
+`attempt` is taken from the `NEW_ATTEMPT_NAME` environment variable, if set.
+It is only used when a new directory is created for a commit. If a directory
+for the current commit already exists, results are added to it regardless of
+the environment variable value.
+
+```bash
+NEW_ATTEMPT_NAME=first-try python simulate.py
+```
 
 
 ## Installation
@@ -26,6 +34,8 @@ pip install .
 ```
 
 ## Usage
+
+More extensive examples can be found in the `examples/` directory.
 
 ```python
 import random
