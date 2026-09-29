@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coordinator"
+version = "0.1.0"
+description = "Parameter sweeps with resumable, provenance-stamped results and plotting"
+requires-python = ">=3.10"
+dependencies = ["pandas", "matplotlib"]
+
+[project.scripts]
+coordinator-plot = "coordinator.plot:main"
+
+[tool.ruff.lint]
+select = ["I", "TID", "N", "UP", "D300", "E", "W", "F", "PGH"]
+ignore = ["E501"]
