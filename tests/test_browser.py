@@ -373,6 +373,128 @@ def test_no_shared_metric_keeps_selection_and_shows_message(tmp_path):
     assert "no common numeric metric" in plot_area.children[1].value
 
 
+def test_browser_settings_save_and_restore_exact_view(tmp_path):
+    pytest.importorskip("ipywidgets")
+    results = tmp_path / "results"
+    run = write_run(results, "exp", "try@aaa1111", "curve")
+    notebook = tmp_path / "notebooks" / "results_browser.ipynb"
+    notebook.parent.mkdir()
+    notebook.write_text("{}")
+    from coordinator.browser_ui import launch_results_browser
+
+    dashboard = launch_results_browser(results)
+    plot_area, overview = dashboard.children[1], dashboard.children[5]
+    relative_run = run.relative_to(results).as_posix()
+    relative_attempt = run.parent.relative_to(results).as_posix()
+    overview.request = {"id": 1, "action": "select", "kind": "run", "path": str(run), "checked": True}
+    metric, logx, logy = plot_area.children[0].children
+    metric.value = "score"
+    logx.value = True
+    logy.value = True
+    for index, kind, path, opened in (
+        (2, "experiment", "exp", False),
+        (3, "attempt", relative_attempt, False),
+        (4, "patch", relative_attempt, False),
+        (5, "data", relative_run, True),
+        (6, "metadata", relative_run, True),
+    ):
+        overview.request = {"id": index, "action": "panel", "kind": kind, "path": path, "open": opened}
+        assert overview.response["ok"] is True
+    search, _ = dashboard.children[2].children
+    search.value = "missing"
+    search.value = ""
+    assert "data-panel-kind='data' data-panel-path='exp/try@aaa1111/curve@abc123' data-initial-open='true' open" in overview.html
+    search.value = "missing"
+    settings_file = notebook.with_name("results_browser.settings.json")
+    saved = json.loads(settings_file.read_text())
+    assert saved["plot"] == {"metric": "score", "logx": True, "logy": True}
+    assert saved["selected_runs"] == [relative_run]
+    assert saved["panels"]["experiment"] == {"exp": False}
+    assert saved["panels"]["data"] == {relative_run: True}
+    assert "search" not in saved
+
+    restored = launch_results_browser(results)
+    restored_search, _ = restored.children[2].children
+    restored_plot, restored_overview = restored.children[1], restored.children[5]
+    assert restored_search.value == ""
+    assert restored_overview.selection["runs"] == [str(run)]
+    assert restored_plot.children[1].layout.xaxis.type == "log"
+    assert restored_plot.children[1].layout.yaxis.type == "log"
+    assert restored_plot.children[0].children[0].value == "score"
+    for kind, path, opened in (
+        ("experiment", "exp", False),
+        ("attempt", relative_attempt, False),
+        ("patch", relative_attempt, False),
+        ("data", relative_run, True),
+        ("metadata", relative_run, True),
+    ):
+        attributes = f"data-panel-kind='{kind}' data-panel-path='{path}' data-initial-open='{str(opened).lower()}'"
+        assert attributes in restored_overview.html
+        if opened:
+            assert f"{attributes} open" in restored_overview.html
+
+    run.joinpath("data.csv").unlink()
+    restored.children[2].children[1].click()
+    cleaned = json.loads(settings_file.read_text())
+    assert cleaned["selected_runs"] == []
+    assert cleaned["panels"]["data"] == {}
+    assert cleaned["panels"]["metadata"] == {}
+
+
+def test_settings_paths_follow_rename_and_delete(tmp_path):
+    pytest.importorskip("ipywidgets")
+    run = write_run(tmp_path, "exp", "try@aaa1111", "curve")
+    from coordinator.browser_ui import launch_results_browser
+
+    settings_file = tmp_path / "custom-view.json"
+    dashboard = launch_results_browser(tmp_path, settings_path=settings_file)
+    overview = dashboard.children[5]
+    overview.request = {"id": 1, "action": "select", "kind": "run", "path": str(run), "checked": True}
+    overview.request = {"id": 2, "action": "panel", "kind": "data", "path": "exp/try@aaa1111/curve@abc123", "open": True}
+    overview.request = {"id": 3, "action": "panel", "kind": "patch", "path": "exp/try@aaa1111", "open": False}
+    overview.request = {"id": 4, "action": "rename", "target": "0", "name": "new-exp"}
+    saved = json.loads(settings_file.read_text())
+    assert saved["selected_runs"] == ["new-exp/try@aaa1111/curve@abc123"]
+    assert saved["panels"]["data"] == {"new-exp/try@aaa1111/curve@abc123": True}
+    assert saved["panels"]["patch"] == {"new-exp/try@aaa1111": False}
+    overview.request = {"id": 5, "action": "delete", "target": "1"}
+    saved = json.loads(settings_file.read_text())
+    assert saved["selected_runs"] == []
+    assert saved["panels"]["data"] == {}
+    assert saved["panels"]["patch"] == {}
+
+
+def test_invalid_settings_warn_without_overwriting_file(tmp_path):
+    pytest.importorskip("ipywidgets")
+    run = write_run(tmp_path, "exp", "aaa1111", "curve")
+    from coordinator.browser_ui import launch_results_browser
+
+    settings_file = tmp_path / "invalid.json"
+    settings_file.write_text("{broken")
+    dashboard = launch_results_browser(tmp_path, settings_path=settings_file)
+    overview = dashboard.children[5]
+    assert "Automatic saving is disabled" in dashboard.children[4].value
+    overview.request = {"id": 1, "action": "select", "kind": "run", "path": str(run), "checked": True}
+    assert len(dashboard.children[1].children[1].data) == 1
+    assert settings_file.read_text() == "{broken"
+
+
+def test_settings_write_failure_warns_and_keeps_browser_usable(tmp_path, monkeypatch):
+    pytest.importorskip("ipywidgets")
+    run = write_run(tmp_path, "exp", "aaa1111", "curve")
+    from coordinator import browser_ui
+
+    def fail_save(_path, _settings):
+        raise PermissionError("read only")
+
+    monkeypatch.setattr(browser_ui, "save_settings", fail_save)
+    dashboard = browser_ui.launch_results_browser(tmp_path, settings_path=tmp_path / "view.json")
+    overview = dashboard.children[5]
+    overview.request = {"id": 1, "action": "select", "kind": "run", "path": str(run), "checked": True}
+    assert overview.selection["runs"] == [str(run)]
+    assert "read only" in dashboard.children[4].value
+
+
 def test_log_controls_show_error_and_allow_recovery(tmp_path):
     pytest.importorskip("ipywidgets")
     run = write_run(tmp_path, "exp", "aaa1111", "curve", rows={"noise": [0, 1], "score": [2, -1]})

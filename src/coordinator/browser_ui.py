@@ -15,6 +15,14 @@ from coordinator.browser import (
     rename_result,
     scan_results,
 )
+from coordinator.browser_settings import (
+    PANEL_DEFAULTS,
+    default_settings,
+    default_settings_path,
+    load_settings,
+    remap_paths,
+    save_settings,
+)
 from coordinator.results import get_results_root
 
 
@@ -56,7 +64,7 @@ def _data_table(run):
     return frame.to_html(index=False, escape=True, border=0, na_rep="")
 
 
-def _runs_table(group, controls, selected, attempt_runs):
+def _runs_table(group, controls, selected, attempt_runs, panel_attrs):
     """Render one wide run table with a visible horizontal scrollbar."""
     params = sorted({key for run in group for key in run.params})
     shared = sorted({key for run in group for key in run.shared})
@@ -88,9 +96,9 @@ def _runs_table(group, controls, selected, attempt_runs):
             f"<b>{controls('run', run.path, run.label)}</b>"
             "</span>"
             "<div style='display:flex;gap:12px;margin-top:3px'>"
-            "<details class='coordinator-view-data'>"
+            f"<details class='coordinator-view-data' {panel_attrs('data', run.path)}>"
             "<summary style='cursor:pointer;color:#38638a'>View data</summary></details>"
-            "<details class='coordinator-view-metadata'>"
+            f"<details class='coordinator-view-metadata' {panel_attrs('metadata', run.path)}>"
             "<summary style='cursor:pointer;color:#38638a'>View metadata</summary></details>"
             "</div>",
             *(_escape(run.params[key]) if key in run.params else "—" for key in params),
@@ -160,8 +168,11 @@ def _group_runs(runs, term=""):
     ]
 
 
-def launch_results_browser(results_root: Path | str | None = None):
-    """Return an expanded experiment/attempt/run overview for JupyterLab."""
+def launch_results_browser(
+    results_root: Path | str | None = None,
+    settings_path: Path | str | None = None,
+):
+    """Return a results overview with persistent settings for JupyterLab."""
     try:
         import ipywidgets as widgets
     except ImportError as exc:
@@ -176,8 +187,18 @@ def launch_results_browser(results_root: Path | str | None = None):
         ) from exc
 
     root = Path(results_root).expanduser().resolve() if results_root else get_results_root().resolve()
+    settings_file = Path(settings_path).expanduser().resolve() if settings_path else default_settings_path(root)
+    settings_error = ""
+    settings_writable = True
+    try:
+        settings = load_settings(settings_file)
+    except (OSError, ValueError, TypeError) as exc:
+        settings = default_settings()
+        settings_error = f"Could not load browser settings from {settings_file}: {exc}. Automatic saving is disabled."
+        settings_writable = False
     runs = []
-    selected = set()
+    scan_issues = []
+    selected = {root / path for path in settings["selected_runs"]}
     targets = {}
     title = widgets.HTML("<h2 style='margin:0'>Simulation results</h2>")
     plot_area = widgets.VBox()
@@ -185,8 +206,8 @@ def launch_results_browser(results_root: Path | str | None = None):
     plot_area.add_class("coordinator-plot-area")
     metric = widgets.Dropdown(description="Metric:")
     metric.layout = widgets.Layout(width="300px", margin="0 20px 0 0")
-    logx = widgets.Checkbox(description="Log X", indent=False)
-    logy = widgets.Checkbox(description="Log Y", indent=False)
+    logx = widgets.Checkbox(description="Log X", indent=False, value=settings["plot"]["logx"])
+    logy = widgets.Checkbox(description="Log Y", indent=False, value=settings["plot"]["logy"])
     logx.layout = widgets.Layout(width="auto", flex="0 0 auto", margin="0")
     logy.layout = widgets.Layout(width="auto", flex="0 0 auto", margin="0 0 0 8px")
     plot_controls = widgets.HBox([metric, logx, logy])
@@ -198,6 +219,39 @@ def launch_results_browser(results_root: Path | str | None = None):
     warnings = widgets.HTML()
     cards = ResultsOverview()
     cards.layout = widgets.Layout(width="100%", min_width="0px")
+
+    def update_warnings(issues=None):
+        messages = [settings_error] if settings_error else []
+        messages.extend(issues or [])
+        warnings.value = "<br>".join(_escape(message) for message in messages[:10])
+        if len(messages) > 10:
+            warnings.value += f"<br>…and {len(messages) - 10} more warnings"
+
+    def persist_settings():
+        nonlocal settings_error
+        if not settings_writable:
+            return
+        try:
+            save_settings(settings_file, settings)
+        except OSError as exc:
+            settings_error = f"Could not save browser settings to {settings_file}: {exc}"
+            update_warnings(scan_issues)
+        else:
+            if settings_error:
+                settings_error = ""
+                update_warnings(scan_issues)
+
+    def relative(path):
+        return path.relative_to(root).as_posix()
+
+    def panel_attrs(kind, path):
+        key = relative(path)
+        opened = settings["panels"][kind].get(key, PANEL_DEFAULTS[kind])
+        return (
+            f"data-panel-kind='{kind}' data-panel-path='{_escape(key)}' "
+            f"data-initial-open='{str(opened).lower()}'"
+            + (" open" if opened else "")
+        )
 
     def selection_state():
         attempts = defaultdict(list)
@@ -228,13 +282,18 @@ def launch_results_browser(results_root: Path | str | None = None):
             plot_area.children = (plot_controls, widgets.HTML(f"<span style='color:#a22'>{_escape(exc)}</span>"))
             return
         metric.disabled = False
-        current = metric.value if metric.value in metrics else metrics[0]
+        current = metric.value if metric.value in metrics else (
+            settings["plot"]["metric"] if settings["plot"]["metric"] in metrics else metrics[0]
+        )
         metric.unobserve(on_plot_control_change, names="value")
         try:
             metric.options = metrics
             metric.value = current
         finally:
             metric.observe(on_plot_control_change, names="value")
+        if settings["plot"]["metric"] != metric.value:
+            settings["plot"]["metric"] = metric.value
+            persist_settings()
         try:
             figure = _ComparisonFigure(make_figure(axis, loaded, metric.value, logx=logx.value, logy=logy.value))
             figure.layout.height = 600
@@ -246,6 +305,8 @@ def launch_results_browser(results_root: Path | str | None = None):
             plot_area.children = (plot_controls, widgets.HTML(f"<span style='color:#a22'>{_escape(exc)}</span>"))
 
     def on_plot_control_change(_change):
+        settings["plot"] = {"metric": metric.value, "logx": logx.value, "logy": logy.value}
+        persist_settings()
         update_plot()
 
     def on_plot_width_change(change):
@@ -312,8 +373,8 @@ def launch_results_browser(results_root: Path | str | None = None):
             "<div class='coordinator-attempt-body' style='box-sizing:border-box;"
             "display:grid;width:100%;max-width:100%;margin-top:16px;"
             "grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:12px'>"
-            f"<div style='min-width:0;max-width:100%'>{_runs_table(group, controls, selected, [run for run in runs if run.path.parent == group[0].path.parent])}</div>"
-            "<details class='coordinator-patch' open style='box-sizing:border-box;"
+            f"<div style='min-width:0;max-width:100%'>{_runs_table(group, controls, selected, [run for run in runs if run.path.parent == group[0].path.parent], panel_attrs)}</div>"
+            f"<details class='coordinator-patch' {panel_attrs('patch', group[0].path.parent)} style='box-sizing:border-box;"
             "min-width:0;max-width:100%;align-self:start;"
             "border:1px solid #d5dbe3;padding:6px'>"
             "<summary aria-label='Toggle source patch' style='display:flex;"
@@ -332,7 +393,7 @@ def launch_results_browser(results_root: Path | str | None = None):
             f"{patch_content}</div></details></div>"
         )
         return (
-            "<details class='coordinator-panel coordinator-attempt' open "
+            f"<details class='coordinator-panel coordinator-attempt' {panel_attrs('attempt', group[0].path.parent)} "
             "style='box-sizing:border-box;border:1px solid #a9b7c7;"
             "padding:10px 12px;margin:8px 0;width:100%;min-width:0'>"
             "<summary style='display:flex;align-items:center;justify-content:space-between;"
@@ -368,7 +429,7 @@ def launch_results_browser(results_root: Path | str | None = None):
                 f"{count} {_plural('run', count)}</small></h3>"
             )
             experiment_cards.append(
-                "<details class='coordinator-panel coordinator-experiment' open "
+                f"<details class='coordinator-panel coordinator-experiment' {panel_attrs('experiment', root / experiment)} "
                 "style='box-sizing:border-box;border:2px solid #607d9b;"
                 "padding:12px 14px;margin:10px 0;width:100%;min-width:0'>"
                 + "<summary style='display:flex;align-items:center;"
@@ -381,12 +442,37 @@ def launch_results_browser(results_root: Path | str | None = None):
         cards.html = "".join(experiment_cards)
 
     def handle_request(change):
+        nonlocal selected
         request = change["new"]
         if not request:
             return
         key = request.get("target")
         response = {"id": request.get("id"), "target": key}
         try:
+            if request.get("action") == "panel":
+                kind = request.get("kind")
+                panel_path = request.get("path")
+                opened = request.get("open")
+                if kind not in PANEL_DEFAULTS or not isinstance(panel_path, str) or not isinstance(opened, bool):
+                    raise ValueError("Invalid panel state.")
+                valid = {
+                    "experiment": {relative(run.path.parent.parent) for run in runs},
+                    "attempt": {relative(run.path.parent) for run in runs},
+                    "patch": {relative(run.path.parent) for run in runs},
+                    "data": {relative(run.path) for run in runs},
+                    "metadata": {relative(run.path) for run in runs},
+                }
+                if panel_path not in valid[kind]:
+                    raise ValueError("Panel is no longer available. Refresh the browser.")
+                panels = settings["panels"][kind]
+                if panels.get(panel_path, PANEL_DEFAULTS[kind]) != opened:
+                    if opened == PANEL_DEFAULTS[kind]:
+                        panels.pop(panel_path, None)
+                    else:
+                        panels[panel_path] = opened
+                    persist_settings()
+                cards.response = {**response, "ok": True}
+                return
             if request.get("action") == "select":
                 kind = request.get("kind")
                 path = Path(request.get("path"))
@@ -404,6 +490,8 @@ def launch_results_browser(results_root: Path | str | None = None):
                     selected.difference_update(choices)
                 else:
                     raise ValueError("Invalid selection state.")
+                settings["selected_runs"] = sorted(relative(path) for path in selected)
+                persist_settings()
                 cards.selection = selection_state()
                 update_plot()
                 cards.response = {**response, "ok": True}
@@ -411,29 +499,45 @@ def launch_results_browser(results_root: Path | str | None = None):
             kind, path = targets[key]
             if request.get("action") == "rename":
                 destination = rename_result(root, kind, path, request.get("name"))
-                selected_copy = set(selected)
-                for old in selected_copy:
-                    if old == path or path in old.parents:
-                        selected.remove(old)
-                        selected.add(destination / old.relative_to(path))
+                remap_paths(settings, relative(path), relative(destination))
+                selected = {root / run for run in settings["selected_runs"]}
             elif request.get("action") == "delete":
                 delete_result(root, kind, path)
-                selected.difference_update({old for old in selected if old == path or path in old.parents})
+                remap_paths(settings, relative(path), None)
+                selected = {root / run for run in settings["selected_runs"]}
             else:
                 raise ValueError("Unknown result action.")
         except (KeyError, OSError, ValueError, TypeError) as exc:
             cards.response = {**response, "ok": False, "error": str(exc)}
             return
         cards.response = {**response, "ok": True}
+        persist_settings()
         rescan()
 
     def rescan(_button=None):
-        nonlocal runs
-        runs, issues = scan_results(root)
-        selected.intersection_update(run.path for run in runs)
-        warnings.value = "<br>".join(_escape(issue) for issue in issues[:10])
-        if len(issues) > 10:
-            warnings.value += f"<br>…and {len(issues) - 10} more warnings"
+        nonlocal runs, scan_issues
+        runs, scan_issues = scan_results(root)
+        if root.is_dir():
+            selected.intersection_update(run.path for run in runs)
+            current = sorted(relative(path) for path in selected)
+            changed = current != settings["selected_runs"]
+            settings["selected_runs"] = current
+            valid = {
+                "experiment": {relative(run.path.parent.parent) for run in runs},
+                "attempt": {relative(run.path.parent) for run in runs},
+                "patch": {relative(run.path.parent) for run in runs},
+                "data": {relative(run.path) for run in runs},
+                "metadata": {relative(run.path) for run in runs},
+            }
+            for kind, panels in settings["panels"].items():
+                stale = panels.keys() - valid[kind]
+                if stale:
+                    changed = True
+                    for path in stale:
+                        del panels[path]
+            if changed:
+                persist_settings()
+        update_warnings(scan_issues)
         render()
         update_plot()
 

@@ -112,6 +112,20 @@ class ResultsOverview(anywidget.AnyWidget):
         });
         model.save_changes();
       });
+      el.addEventListener('toggle', (event) => {
+        const panel = event.target;
+        if (!panel.matches('details[data-panel-kind]')) return;
+        if (!panel.dataset.panelSeen) {
+          panel.dataset.panelSeen = 'true';
+          if (panel.open === (panel.dataset.initialOpen === 'true')) return;
+        }
+        const id = ++serial;
+        model.set('request', {
+          id, action: 'panel', kind: panel.dataset.panelKind,
+          path: panel.dataset.panelPath, open: panel.open,
+        });
+        model.save_changes();
+      }, true);
       el.addEventListener('pointerdown', (event) => {
         if (event.target.closest('.coordinator-delete') && active) cancel();
       });
