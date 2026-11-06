@@ -8,8 +8,9 @@ Layout:
             meta.json
 
 - Outside a git repository, `./results` is used and the commit is `nogit`.
-- The patch hash is calculated from `git diff HEAD` and serves to
-  differentiate runs with different uncommitted code versions.
+- The patch hash covers uncommitted changes to files selected by
+  `.coordinatorinclude`, including untracked files. Git ignored files are
+  excluded. Without include rules, all nonignored files are selected.
 - NEW_ATTEMPT_NAME prefixes newly created revision directories only.
   Existing directories are matched by revision, ignoring the attempt name.
 - If matching runs already exist, datapoints are appended instead of
@@ -27,6 +28,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pathspec
 
 #
 #
@@ -50,19 +52,76 @@ def _run_git_cmd(*args: str) -> str:
     return completed.stdout.strip()
 
 
-@functools.cache
-def _get_patch() -> str:
-    return _run_git_cmd("diff", "HEAD")
+def _git_bytes(*args: str, input_data: bytes | None = None) -> bytes:
+    try:
+        completed = subprocess.run(
+            ["git", *args], input=input_data, capture_output=True, check=False
+        )
+    except FileNotFoundError:
+        return b""
+    return completed.stdout
 
 
-def get_revision() -> str:
+def _nul_paths(data: bytes) -> list[str]:
+    return [os.fsdecode(path) for path in data.split(b"\0") if path]
+
+
+def _get_patch() -> bytes:
+    root = _run_git_cmd("rev-parse", "--show-toplevel")
+    if not root:
+        return b""
+
+    include_path = Path(root) / ".coordinatorinclude"
+    rules = include_path.read_text().splitlines() if include_path.exists() else []
+    has_rules = any(line.strip() and not line.startswith("#") for line in rules)
+    spec = pathspec.GitIgnoreSpec.from_lines(rules) if has_rules else None
+
+    tracked_changes = _nul_paths(_git_bytes("-C", root, "diff", "--name-only", "-z", "HEAD"))
+    untracked = _nul_paths(_git_bytes("-C", root, "ls-files", "--others", "--exclude-standard", "-z"))
+    config_name = ".coordinatorinclude"
+    if include_path.exists() and config_name not in tracked_changes and config_name not in untracked:
+        if not _git_bytes("-C", root, "ls-files", "--error-unmatch", "--", config_name):
+            untracked.append(config_name)
+
+    candidates = sorted(set(tracked_changes + untracked) - {config_name})
+    ignored = set()
+    if candidates:
+        ignored = set(_nul_paths(_git_bytes(
+            "-C", root, "check-ignore", "--no-index", "-z", "--stdin",
+            input_data=b"\0".join(os.fsencode(path) for path in candidates) + b"\0",
+        )))
+
+    selected = {path for path in candidates if path not in ignored and (
+        spec is None or spec.match_file(path)
+    )}
+    if config_name in tracked_changes or config_name in untracked:
+        selected.add(config_name)
+
+    tracked_selected = sorted(selected.intersection(tracked_changes))
+    untracked_selected = sorted(selected.intersection(untracked))
+    patch = b""
+    if tracked_selected:
+        patch = _git_bytes(
+            "-C", root, "diff", "--no-ext-diff", "--binary", "HEAD", "--",
+            *(f":(literal){path}" for path in tracked_selected),
+        )
+    for path in untracked_selected:
+        patch += _git_bytes("-C", root, "diff", "--no-index", "--binary", "--", "/dev/null", path)
+    return patch
+
+
+def _revision_and_patch() -> tuple[str, bytes]:
     commit = _run_git_cmd("rev-parse", "--short=7", "HEAD") or "nogit"
     patch = _get_patch()
     if not patch:
-        return commit
+        return commit, patch
 
-    patch_hash = hashlib.sha256(patch.encode()).hexdigest()[:6]
-    return f"{commit}-dirty_{patch_hash}"
+    patch_hash = hashlib.sha256(patch).hexdigest()[:6]
+    return f"{commit}-dirty_{patch_hash}", patch
+
+
+def get_revision() -> str:
+    return _revision_and_patch()[0]
 
 
 @functools.cache
@@ -120,7 +179,7 @@ def resolve_and_open_run(
     experiment: str, label: str, params: dict, meta=None
 ) -> RunDir:
     experiment_dir = get_results_root() / experiment
-    revision = get_revision()
+    revision, patch = _revision_and_patch()
     attempt = os.environ.get("NEW_ATTEMPT_NAME", "")
     revision_dir = experiment_dir / (f"{attempt}@{revision}" if attempt else revision)
     for candidate in sorted(experiment_dir.glob("*")):
@@ -147,9 +206,8 @@ def resolve_and_open_run(
         json.dump(full_meta, handle, indent=2, sort_keys=True, default=str)
 
     patch_path = revision_dir / "source.patch"
-    patch = _get_patch()
     if patch and not patch_path.exists():
-        patch_path.write_text(patch)
+        patch_path.write_bytes(patch)
 
     return RunDir(run_dir)
 

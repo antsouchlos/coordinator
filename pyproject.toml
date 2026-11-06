@@ -7,7 +7,7 @@ name = "coordinator"
 version = "0.1.0"
 description = "Parameter sweeps with resumable, provenance-stamped results and plotting"
 requires-python = ">=3.10"
-dependencies = ["pandas", "matplotlib", "ipywidgets>=8", "plotly>=6", "anywidget>=0.9.13"]
+dependencies = ["pandas", "matplotlib", "ipywidgets>=8", "plotly>=6", "anywidget>=0.9.13", "pathspec>=0.12"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
