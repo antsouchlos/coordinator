@@ -56,3 +56,7 @@ sweep(
 ```bash
 coordinator-plot results/error-over-noise/*/* --y mean_error
 ```
+
+## Browse results in JupyterLab
+
+Copy `notebooks/results_browser.ipynb` into your project and run it.
