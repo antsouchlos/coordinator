@@ -21,26 +21,20 @@ It is only used when a new revision directory is created. If a directory
 for the current revision already exists, results are added to it regardless of
 the environment variable value.
 
+```bash
+NEW_ATTEMPT_NAME=first-try python simulate.py
+```
+
 The commit in the directory name is always the current Git `HEAD`. To limit
 which uncommitted changes add a `-dirty_<hash>` suffix and appear in
-`source.patch`, create `.coordinatorinclude` at the repository root:
+`source.patch`, create `.coordinatorinclude` at the repository root. Changes
+to `.coordinatorinclude` itself always count as dirty changes.
 
 ```gitignore
 src/simulation/**
 configs/**
 !configs/generated/**
 ```
-
-- If the file is missing or empty, all files not ignored by Git are included
-- Patterns use Gitignore syntax.
-- Git ignored files are always excluded.
-- Changes to `.coordinatorinclude` itself always count as dirty changes.
-- A new commit changes the revision even when it only changes excluded files.
-
-```bash
-NEW_ATTEMPT_NAME=first-try python simulate.py
-```
-
 
 ## Installation
 
