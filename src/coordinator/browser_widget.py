@@ -5,11 +5,13 @@ import traitlets
 
 
 class ResultsOverview(anywidget.AnyWidget):
-    """Render overview HTML and relay inline edits to the Python kernel."""
+    """Render overview HTML and relay edits and plot selections to Python."""
 
     html = traitlets.Unicode("").tag(sync=True)
     request = traitlets.Dict(default_value={}).tag(sync=True)
     response = traitlets.Dict(default_value={}).tag(sync=True)
+    selection = traitlets.Dict(default_value={}).tag(sync=True)
+    plot_width = traitlets.Int(0).tag(sync=True)
 
     _esm = r"""
     export function render({model, el}) {
@@ -19,6 +21,21 @@ class ResultsOverview(anywidget.AnyWidget):
       const draw = () => {
         active = null;
         el.innerHTML = model.get('html');
+        syncSelection();
+      };
+      const syncSelection = () => {
+        const state = model.get('selection') || {};
+        const selected = new Set(state.runs || []);
+        const attempts = state.attempts || {};
+        el.querySelectorAll('.coordinator-select').forEach((input) => {
+          if (input.dataset.selectKind === 'run') {
+            input.checked = selected.has(input.dataset.selectPath);
+          } else {
+            const status = attempts[input.dataset.selectPath] || 'none';
+            input.checked = status === 'all';
+            input.indeterminate = status === 'some';
+          }
+        });
       };
       const cancel = () => {
         if (!active) return;
@@ -41,6 +58,10 @@ class ResultsOverview(anywidget.AnyWidget):
         model.save_changes();
       };
       el.addEventListener('click', (event) => {
+        if (event.target.matches('.coordinator-select')) {
+          event.stopPropagation();
+          return;
+        }
         if (event.target.matches('.coordinator-name-input')) {
           event.stopPropagation();
           return;
@@ -81,6 +102,16 @@ class ResultsOverview(anywidget.AnyWidget):
         model.set('request', {id, action: 'delete', target: button.dataset.resultId});
         model.save_changes();
       });
+      el.addEventListener('change', (event) => {
+        const input = event.target;
+        if (!input.matches('.coordinator-select')) return;
+        const id = ++serial;
+        model.set('request', {
+          id, action: 'select', kind: input.dataset.selectKind,
+          path: input.dataset.selectPath, checked: input.checked,
+        });
+        model.save_changes();
+      });
       el.addEventListener('pointerdown', (event) => {
         if (event.target.closest('.coordinator-delete') && active) cancel();
       });
@@ -94,6 +125,7 @@ class ResultsOverview(anywidget.AnyWidget):
       model.on('change:response', () => {
         const response = model.get('response');
         if (response.ok) return;
+        syncSelection();
         if (active && response.id === active.requestId) {
           active.pending = false;
           active.input.disabled = false;
@@ -106,7 +138,33 @@ class ResultsOverview(anywidget.AnyWidget):
         window.alert(response.error);
       });
       model.on('change:html', draw);
+      model.on('change:selection', syncSelection);
       draw();
+      let observer = null;
+      let disposed = false;
+      let attempts = 0;
+      const connectPlotSize = () => {
+        if (disposed) return;
+        const dashboard = el.closest('.coordinator-dashboard');
+        const plotArea = dashboard?.querySelector('.coordinator-plot-area');
+        if (!dashboard || !plotArea) {
+          if (++attempts < 120) requestAnimationFrame(connectPlotSize);
+          return;
+        }
+        const measure = () => {
+          const width = Math.floor(plotArea.getBoundingClientRect().width || dashboard.getBoundingClientRect().width);
+          if (width > 0 && width !== model.get('plot_width')) {
+            model.set('plot_width', width);
+            model.save_changes();
+          }
+        };
+        observer = new ResizeObserver(measure);
+        observer.observe(dashboard);
+        observer.observe(plotArea);
+        measure();
+      };
+      requestAnimationFrame(connectPlotSize);
+      return () => { disposed = true; observer?.disconnect(); };
     }
     """
 
@@ -117,6 +175,8 @@ class ResultsOverview(anywidget.AnyWidget):
     .coordinator-editable[data-edit-name=''] { color:#667; font-weight:normal; }
     .coordinator-name-input { font:inherit; font-weight:inherit; box-sizing:border-box; max-width:90%; }
     .coordinator-edit-error { color:#a22; font-size:12px; margin-left:6px; }
+    .coordinator-select-label { display:inline-flex; align-items:center; gap:5px; }
+    .coordinator-select { margin:0; cursor:pointer; }
     .coordinator-delete { opacity:.35; border:0; background:transparent; color:inherit;
       cursor:pointer; padding:0 4px; display:inline-flex; align-items:center;
       vertical-align:middle; }

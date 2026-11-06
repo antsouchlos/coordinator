@@ -72,6 +72,17 @@ def test_load_and_compare_runs_across_experiments(tmp_path):
     figure = make_figure(axis, loaded, "score", "err", logx=True)
     assert len(figure.data) == 2
     assert figure.layout.xaxis.type == "log"
+    assert figure.layout.xaxis.dtick == 1
+    assert figure.layout.xaxis.exponentformat == "power"
+    assert figure.layout.xaxis.showexponent == "all"
+    assert figure.layout.xaxis.minor.dtick == "D1"
+    assert figure.layout.xaxis.minor.showgrid is True
+    assert figure.layout.xaxis.minor.griddash == "dot"
+    assert figure.layout.yaxis.exponentformat is None
+    assert figure.layout.yaxis.minor.showgrid is None
+    assert figure.layout.autosize is True
+    assert figure.layout.legend.orientation == "h"
+    assert figure.layout.legend.y < 0
     assert all(trace.error_y.visible for trace in figure.data)
     assert figure.data[0].name != figure.data[1].name
 
@@ -117,10 +128,10 @@ def test_nested_overview_search_refresh_and_patch(tmp_path):
     write_run(tmp_path, "exp", "bbb2222", "third")
     from coordinator.browser_ui import launch_results_browser
     dashboard = launch_results_browser(tmp_path)
-    search, refresh = dashboard.children[1].children
-    overview = dashboard.children[4]
+    search, refresh = dashboard.children[2].children
+    overview = dashboard.children[5]
     markup = overview.html
-    assert "3 runs" in dashboard.children[2].value
+    assert "3 runs" in dashboard.children[3].value
     assert "try-one" in markup
     assert markup.count("class='coordinator-run'") == 3
     assert "&lt;cell&gt;" in markup
@@ -134,11 +145,11 @@ def test_nested_overview_search_refresh_and_patch(tmp_path):
 
     search.value = "second"
     assert overview.html.count("class='coordinator-run'") == 1
-    assert "1 matching run" in dashboard.children[2].value
+    assert "1 matching run" in dashboard.children[3].value
     search.value = ""
     write_run(tmp_path, "exp-two", "ccc3333", "fourth")
     refresh.click()
-    assert "4 runs" in dashboard.children[2].value
+    assert "4 runs" in dashboard.children[3].value
     assert "exp-two" in overview.html
 
 
@@ -150,9 +161,9 @@ def test_overview_preserves_valid_runs_when_metadata_is_invalid(tmp_path):
     from coordinator.browser_ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
-    assert "1 run" in dashboard.children[2].value
-    assert "invalid meta.json" in dashboard.children[3].value
-    assert "good" in dashboard.children[4].html
+    assert "1 run" in dashboard.children[3].value
+    assert "invalid meta.json" in dashboard.children[4].value
+    assert "good" in dashboard.children[5].html
 
 
 def test_rename_experiment_updates_directory_and_metadata(tmp_path):
@@ -216,7 +227,7 @@ def test_overview_actions_rescan_and_report_errors(tmp_path):
     from coordinator.browser_ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
-    overview = dashboard.children[4]
+    overview = dashboard.children[5]
     overview.request = {"id": 1, "action": "rename", "target": "0", "name": "taken"}
     assert overview.response["ok"] is False
     assert "already exists" in overview.response["error"]
@@ -226,3 +237,157 @@ def test_overview_actions_rescan_and_report_errors(tmp_path):
     overview.request = {"id": 3, "action": "delete", "target": "2"}
     assert overview.response["ok"] is True
     assert not (tmp_path / "exp" / "aaa1111" / "new-curve@abc123").exists()
+
+
+def test_selection_plots_runs_across_experiments_and_changes_metric(tmp_path):
+    pytest.importorskip("ipywidgets")
+    first = write_run(tmp_path, "exp-a", "aaa1111", "curve")
+    second = write_run(tmp_path, "exp-b", "bbb2222", "curve")
+    from coordinator.browser_ui import launch_results_browser
+
+    dashboard = launch_results_browser(tmp_path)
+    plot_area, overview = dashboard.children[1], dashboard.children[5]
+    overview.plot_width = 1040
+    assert plot_area.layout.display == "none"
+    assert overview.html.count("data-select-kind='run'") == 2
+    for index, run in enumerate((first, second), start=1):
+        overview.request = {"id": index, "action": "select", "kind": "run", "path": str(run), "checked": True}
+        assert overview.response["ok"] is True
+    assert set(overview.selection["runs"]) == {str(first), str(second)}
+    controls, figure = plot_area.children
+    metric, logx, logy = controls.children
+    assert plot_area.layout.display == "flex"
+    assert plot_area.layout.width == "100%"
+    assert plot_area.layout.margin == "0 0 28px 0"
+    assert "coordinator-comparison-figure" in figure._dom_classes
+    assert figure.layout.height == 600
+    assert figure.layout.width == 1040
+    overview.plot_width = 1180
+    assert figure.layout.width == 1180
+    assert len(figure.data) == 2
+    assert figure.data[0].name != figure.data[1].name
+    assert set(metric.options) == {"score", "err"}
+    metric.value = "score"
+    assert dashboard.children[1].children[1].layout.yaxis.title.text == "score"
+    assert dashboard.children[1].children[1].layout.width == 1180
+    logx.value = True
+    assert dashboard.children[1].children[1].layout.xaxis.type == "log"
+    assert dashboard.children[1].children[1].layout.xaxis.exponentformat == "power"
+    logy.value = True
+    assert dashboard.children[1].children[1].layout.yaxis.type == "log"
+    assert dashboard.children[1].children[1].layout.yaxis.exponentformat == "power"
+    assert dashboard.children[1].children[1].layout.yaxis.minor.dtick == "D1"
+    assert dashboard.children[1].children[1].layout.yaxis.minor.showgrid is True
+    overview.request = {"id": 3, "action": "select", "kind": "run", "path": str(first), "checked": False}
+    overview.request = {"id": 4, "action": "select", "kind": "run", "path": str(second), "checked": False}
+    assert plot_area.layout.display == "none"
+    assert not plot_area.children
+
+
+def test_attempt_selection_includes_hidden_runs_and_shows_partial_state(tmp_path):
+    pytest.importorskip("ipywidgets")
+    first = write_run(tmp_path, "exp", "try@aaa1111", "first")
+    second = write_run(tmp_path, "exp", "try@aaa1111", "second")
+    from coordinator.browser_ui import launch_results_browser
+
+    dashboard = launch_results_browser(tmp_path)
+    search, _ = dashboard.children[2].children
+    overview = dashboard.children[5]
+    search.value = "first"
+    assert overview.html.count("class='coordinator-run'") == 1
+    overview.request = {"id": 1, "action": "select", "kind": "attempt", "path": str(first.parent), "checked": True}
+    assert set(overview.selection["runs"]) == {str(first), str(second)}
+    assert overview.selection["attempts"][str(first.parent)] == "all"
+    overview.request = {"id": 2, "action": "select", "kind": "run", "path": str(first), "checked": False}
+    assert overview.selection["attempts"][str(first.parent)] == "some"
+    search.value = ""
+    assert overview.html.count("data-select-kind='run'") == 2
+    overview.request = {"id": 3, "action": "select", "kind": "attempt", "path": str(first.parent), "checked": False}
+    assert overview.selection["runs"] == []
+
+
+def test_selection_survives_rename_and_refresh_and_drops_deleted_runs(tmp_path):
+    pytest.importorskip("ipywidgets")
+    first = write_run(tmp_path, "exp", "try@aaa1111", "first")
+    from coordinator.browser_ui import launch_results_browser
+
+    dashboard = launch_results_browser(tmp_path)
+    _, refresh = dashboard.children[2].children
+    overview = dashboard.children[5]
+    overview.request = {"id": 1, "action": "select", "kind": "run", "path": str(first), "checked": True}
+    overview.request = {"id": 2, "action": "rename", "target": "0", "name": "new-exp"}
+    renamed = tmp_path / "new-exp" / first.parent.name / first.name
+    assert overview.selection["runs"] == [str(renamed)]
+    refresh.click()
+    assert overview.selection["runs"] == [str(renamed)]
+    renamed.joinpath("data.csv").unlink()
+    refresh.click()
+    assert overview.selection["runs"] == []
+    assert dashboard.children[1].layout.display == "none"
+
+
+def test_selection_follows_attempt_and_run_renames_then_delete(tmp_path):
+    pytest.importorskip("ipywidgets")
+    first = write_run(tmp_path, "exp", "try@aaa1111", "first")
+    from coordinator.browser_ui import launch_results_browser
+
+    dashboard = launch_results_browser(tmp_path)
+    overview = dashboard.children[5]
+    overview.request = {"id": 1, "action": "select", "kind": "run", "path": str(first), "checked": True}
+    overview.request = {"id": 2, "action": "rename", "target": "1", "name": "new-try"}
+    moved = tmp_path / "exp" / "new-try@aaa1111" / first.name
+    assert overview.selection["runs"] == [str(moved)]
+    overview.request = {"id": 3, "action": "rename", "target": "2", "name": "new-first"}
+    moved = moved.with_name("new-first@abc123")
+    assert overview.selection["runs"] == [str(moved)]
+    overview.request = {"id": 4, "action": "delete", "target": "2"}
+    assert overview.selection["runs"] == []
+    assert dashboard.children[1].layout.display == "none"
+
+
+def test_incompatible_selection_keeps_checkboxes_and_shows_message(tmp_path):
+    pytest.importorskip("ipywidgets")
+    first = write_run(tmp_path, "exp", "aaa1111", "first")
+    second = write_run(tmp_path, "exp", "bbb2222", "second", axis="time", rows={"time": [1, 2], "other": [2, 3]})
+    from coordinator.browser_ui import launch_results_browser
+
+    dashboard = launch_results_browser(tmp_path)
+    plot_area, overview = dashboard.children[1], dashboard.children[5]
+    for index, run in enumerate((first, second), start=1):
+        overview.request = {"id": index, "action": "select", "kind": "run", "path": str(run), "checked": True}
+    assert len(overview.selection["runs"]) == 2
+    assert "different axes" in plot_area.children[1].value
+
+
+def test_no_shared_metric_keeps_selection_and_shows_message(tmp_path):
+    pytest.importorskip("ipywidgets")
+    first = write_run(tmp_path, "exp", "aaa1111", "first")
+    second = write_run(tmp_path, "exp", "bbb2222", "second", rows={"noise": [1, 2], "other": [2, 3]})
+    from coordinator.browser_ui import launch_results_browser
+
+    dashboard = launch_results_browser(tmp_path)
+    plot_area, overview = dashboard.children[1], dashboard.children[5]
+    for index, run in enumerate((first, second), start=1):
+        overview.request = {"id": index, "action": "select", "kind": "run", "path": str(run), "checked": True}
+    assert len(overview.selection["runs"]) == 2
+    assert "no common numeric metric" in plot_area.children[1].value
+
+
+def test_log_controls_show_error_and_allow_recovery(tmp_path):
+    pytest.importorskip("ipywidgets")
+    run = write_run(tmp_path, "exp", "aaa1111", "curve", rows={"noise": [0, 1], "score": [2, -1]})
+    from coordinator.browser_ui import launch_results_browser
+
+    dashboard = launch_results_browser(tmp_path)
+    plot_area, overview = dashboard.children[1], dashboard.children[5]
+    overview.request = {"id": 1, "action": "select", "kind": "run", "path": str(run), "checked": True}
+    controls, _ = plot_area.children
+    metric, logx, logy = controls.children
+    metric.value = "score"
+    logx.value = True
+    assert "log x requires positive" in plot_area.children[1].value
+    logx.value = False
+    logy.value = True
+    assert "log y requires positive" in plot_area.children[1].value
+    logy.value = False
+    assert len(plot_area.children[1].data) == 1

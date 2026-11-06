@@ -6,9 +6,27 @@ from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
+import plotly.graph_objects as go
 
-from coordinator.browser import delete_result, rename_result, scan_results
+from coordinator.browser import (
+    delete_result,
+    load_selected,
+    make_figure,
+    rename_result,
+    scan_results,
+)
 from coordinator.results import get_results_root
+
+
+class _ComparisonFigure(go.FigureWidget):
+    _css = """
+    .coordinator-comparison-figure {
+        display: block;
+        box-sizing: border-box;
+        width: 100% !important;
+        min-width: 0;
+    }
+    """
 
 
 def _escape(value):
@@ -38,20 +56,37 @@ def _data_table(run):
     return frame.to_html(index=False, escape=True, border=0, na_rep="")
 
 
-def _runs_table(group, controls):
+def _runs_table(group, controls, selected, attempt_runs):
     """Render one wide run table with a visible horizontal scrollbar."""
     params = sorted({key for run in group for key in run.params})
     shared = sorted({key for run in group for key in run.shared})
     header_style = "text-align:left;padding:5px 7px;border-bottom:2px solid #c8d1db;white-space:nowrap"
     cell_style = "padding:5px 7px;border-bottom:1px solid #e3e8ed;white-space:nowrap"
     headers = ["Run", *params, *(f"Shared: {key}" for key in shared), "Axis", "Started"]
+    attempt_path = group[0].path.parent
+    all_selected = all(run.path in selected for run in attempt_runs)
+    select_all = (
+        "<label class='coordinator-select-label'>"
+        f"<input class='coordinator-select' type='checkbox' data-select-kind='attempt' "
+        f"data-select-path='{_escape(attempt_path)}' aria-label='Select all runs in attempt {_escape(attempt_path.name)}'"
+        + (" checked" if all_selected else "")
+        + "> Run</label>"
+    )
     rows = [
-        "<tr>" + "".join(f"<th style='{header_style}'>{_escape(label)}</th>" for label in headers) + "</tr>"
+        "<tr><th style='" + header_style + "'>" + select_all + "</th>"
+        + "".join(f"<th style='{header_style}'>{_escape(label)}</th>" for label in headers[1:])
+        + "</tr>"
     ]
     for run in group:
         metadata = json.dumps(run.metadata, indent=2, sort_keys=True, default=str)
         values = [
+            "<span class='coordinator-select-label'>"
+            f"<input class='coordinator-select' type='checkbox' data-select-kind='run' "
+            f"data-select-path='{_escape(run.path)}' aria-label='Plot run {_escape(run.label)}'"
+            + (" checked" if run.path in selected else "")
+            + ">"
             f"<b>{controls('run', run.path, run.label)}</b>"
+            "</span>"
             "<div style='display:flex;gap:12px;margin-top:3px'>"
             "<details class='coordinator-view-data'>"
             "<summary style='cursor:pointer;color:#38638a'>View data</summary></details>"
@@ -142,8 +177,20 @@ def launch_results_browser(results_root: Path | str | None = None):
 
     root = Path(results_root).expanduser().resolve() if results_root else get_results_root().resolve()
     runs = []
+    selected = set()
     targets = {}
     title = widgets.HTML("<h2 style='margin:0'>Simulation results</h2>")
+    plot_area = widgets.VBox()
+    plot_area.layout = widgets.Layout(width="100%", min_width="0px", display="none", margin="0 0 28px 0")
+    plot_area.add_class("coordinator-plot-area")
+    metric = widgets.Dropdown(description="Metric:")
+    metric.layout = widgets.Layout(width="300px", margin="0 20px 0 0")
+    logx = widgets.Checkbox(description="Log X", indent=False)
+    logy = widgets.Checkbox(description="Log Y", indent=False)
+    logx.layout = widgets.Layout(width="auto", flex="0 0 auto", margin="0")
+    logy.layout = widgets.Layout(width="auto", flex="0 0 auto", margin="0 0 0 8px")
+    plot_controls = widgets.HBox([metric, logx, logy])
+    plot_controls.layout = widgets.Layout(align_items="center", margin="0 0 12px 0")
     summary = widgets.HTML()
     search = widgets.Text(placeholder="Search experiments, revisions, runs, parameters")
     search.layout = widgets.Layout(width="min(560px, 75%)")
@@ -151,6 +198,59 @@ def launch_results_browser(results_root: Path | str | None = None):
     warnings = widgets.HTML()
     cards = ResultsOverview()
     cards.layout = widgets.Layout(width="100%", min_width="0px")
+
+    def selection_state():
+        attempts = defaultdict(list)
+        for run in runs:
+            attempts[str(run.path.parent)].append(run.path)
+        return {
+            "runs": sorted(str(path) for path in selected),
+            "attempts": {
+                path: ("all" if all(run in selected for run in group) else
+                       "some" if any(run in selected for run in group) else "none")
+                for path, group in attempts.items()
+            },
+        }
+
+    def update_plot():
+        if not selected:
+            plot_area.children = ()
+            plot_area.layout.display = "none"
+            return
+        plot_area.layout.display = "flex"
+        chosen = [run for run in runs if run.path in selected]
+        try:
+            axis, loaded, metrics = load_selected(chosen)
+            if not metrics:
+                raise ValueError("Selected runs have no common numeric metric.")
+        except ValueError as exc:
+            metric.disabled = True
+            plot_area.children = (plot_controls, widgets.HTML(f"<span style='color:#a22'>{_escape(exc)}</span>"))
+            return
+        metric.disabled = False
+        current = metric.value if metric.value in metrics else metrics[0]
+        metric.unobserve(on_plot_control_change, names="value")
+        try:
+            metric.options = metrics
+            metric.value = current
+        finally:
+            metric.observe(on_plot_control_change, names="value")
+        try:
+            figure = _ComparisonFigure(make_figure(axis, loaded, metric.value, logx=logx.value, logy=logy.value))
+            figure.layout.height = 600
+            if cards.plot_width:
+                figure.layout.width = cards.plot_width
+            figure.add_class("coordinator-comparison-figure")
+            plot_area.children = (plot_controls, figure)
+        except ValueError as exc:
+            plot_area.children = (plot_controls, widgets.HTML(f"<span style='color:#a22'>{_escape(exc)}</span>"))
+
+    def on_plot_control_change(_change):
+        update_plot()
+
+    def on_plot_width_change(change):
+        if len(plot_area.children) == 2 and isinstance(plot_area.children[1], _ComparisonFigure):
+            plot_area.children[1].layout.width = change["new"]
 
     def controls(kind, path, name, *, suffix="", placeholder=None, delete_name=None):
         key = str(len(targets))
@@ -212,7 +312,7 @@ def launch_results_browser(results_root: Path | str | None = None):
             "<div class='coordinator-attempt-body' style='box-sizing:border-box;"
             "display:grid;width:100%;max-width:100%;margin-top:16px;"
             "grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:12px'>"
-            f"<div style='min-width:0;max-width:100%'>{_runs_table(group, controls)}</div>"
+            f"<div style='min-width:0;max-width:100%'>{_runs_table(group, controls, selected, [run for run in runs if run.path.parent == group[0].path.parent])}</div>"
             "<details class='coordinator-patch' open style='box-sizing:border-box;"
             "min-width:0;max-width:100%;align-self:start;"
             "border:1px solid #d5dbe3;padding:6px'>"
@@ -252,6 +352,7 @@ def launch_results_browser(results_root: Path | str | None = None):
             f"{_plural('experiment', len({run.experiment for run in runs}))}"
             + (f" · {visible} matching {_plural('run', visible)}" if search.value.strip() else "")
         )
+        cards.selection = selection_state()
         if not grouped:
             cards.html = "No matching runs." if search.value.strip() else "No runs found."
             return
@@ -286,11 +387,38 @@ def launch_results_browser(results_root: Path | str | None = None):
         key = request.get("target")
         response = {"id": request.get("id"), "target": key}
         try:
+            if request.get("action") == "select":
+                kind = request.get("kind")
+                path = Path(request.get("path"))
+                if kind == "run":
+                    choices = {run.path for run in runs if run.path == path}
+                elif kind == "attempt":
+                    choices = {run.path for run in runs if run.path.parent == path}
+                else:
+                    raise ValueError("Unknown selection type.")
+                if not choices:
+                    raise ValueError("Result is no longer available. Refresh the browser.")
+                if request.get("checked") is True:
+                    selected.update(choices)
+                elif request.get("checked") is False:
+                    selected.difference_update(choices)
+                else:
+                    raise ValueError("Invalid selection state.")
+                cards.selection = selection_state()
+                update_plot()
+                cards.response = {**response, "ok": True}
+                return
             kind, path = targets[key]
             if request.get("action") == "rename":
-                rename_result(root, kind, path, request.get("name"))
+                destination = rename_result(root, kind, path, request.get("name"))
+                selected_copy = set(selected)
+                for old in selected_copy:
+                    if old == path or path in old.parents:
+                        selected.remove(old)
+                        selected.add(destination / old.relative_to(path))
             elif request.get("action") == "delete":
                 delete_result(root, kind, path)
+                selected.difference_update({old for old in selected if old == path or path in old.parents})
             else:
                 raise ValueError("Unknown result action.")
         except (KeyError, OSError, ValueError, TypeError) as exc:
@@ -302,17 +430,24 @@ def launch_results_browser(results_root: Path | str | None = None):
     def rescan(_button=None):
         nonlocal runs
         runs, issues = scan_results(root)
+        selected.intersection_update(run.path for run in runs)
         warnings.value = "<br>".join(_escape(issue) for issue in issues[:10])
         if len(issues) > 10:
             warnings.value += f"<br>…and {len(issues) - 10} more warnings"
         render()
+        update_plot()
 
     refresh.on_click(rescan)
     search.observe(render, names="value")
+    metric.observe(on_plot_control_change, names="value")
+    logx.observe(on_plot_control_change, names="value")
+    logy.observe(on_plot_control_change, names="value")
     cards.observe(handle_request, names="request")
+    cards.observe(on_plot_width_change, names="plot_width")
     dashboard = widgets.VBox(
-        [title, widgets.HBox([search, refresh]), summary, warnings, cards],
+        [title, plot_area, widgets.HBox([search, refresh]), summary, warnings, cards],
         layout=widgets.Layout(width="100%"),
     )
+    dashboard.add_class("coordinator-dashboard")
     rescan()
     return dashboard

@@ -246,8 +246,45 @@ def make_figure(
         yaxis_title=metric,
         xaxis_type="log" if logx else "linear",
         yaxis_type="log" if logy else "linear",
+        autosize=True,
         hovermode="closest",
         template="plotly_white",
         legend_title="Runs",
+        legend={
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": -0.2,
+            "yanchor": "top",
+        },
+        margin={"b": 120},
     )
+    if logx:
+        figure.update_xaxes(
+            dtick=1,
+            exponentformat="power",
+            showexponent="all",
+            minor={
+                "dtick": "D1",
+                "showgrid": True,
+                "gridcolor": "rgba(120, 130, 140, 0.25)",
+                "griddash": "dot",
+                "ticks": "outside",
+                "ticklen": 3,
+            },
+        )
+    if logy:
+        figure.update_yaxes(
+            dtick=1,
+            exponentformat="power",
+            showexponent="all",
+            minor={
+                "dtick": "D1",
+                "showgrid": True,
+                "gridcolor": "rgba(120, 130, 140, 0.25)",
+                "griddash": "dot",
+                "ticks": "outside",
+                "ticklen": 3,
+            },
+        )
     return figure
