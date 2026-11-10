@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from coordinator import Run, sweep
-from coordinator.results import get_results_root, get_revision, resolve_and_open_run
+from coordinator.results import get_results_root, _get_revision, resolve_and_open_run
 
 
 def git(repo, *args):
@@ -40,10 +40,10 @@ def test_include_rules_scope_dirty_hash_and_patch(repo):
 
     (repo / "skip.txt").write_text("changed\n")
     (repo / "ignored.txt").write_text("ignored\n")
-    assert get_revision() == commit
+    assert _get_revision() == commit
 
     (repo / "keep.txt").write_text("changed\n")
-    revision = get_revision()
+    revision = _get_revision()
     assert revision.startswith(f"{commit}-dirty_")
     run = resolve_and_open_run("experiment", "curve", {})
     patch = (run.path.parent / "source.patch").read_text()
@@ -52,7 +52,7 @@ def test_include_rules_scope_dirty_hash_and_patch(repo):
     assert "ignored.txt" not in patch
 
     (repo / "keep.txt").write_text("changed again\n")
-    assert get_revision() != revision
+    assert _get_revision() != revision
 
 
 def test_untracked_files_and_include_rules_change_revision(repo):
@@ -62,10 +62,10 @@ def test_untracked_files_and_include_rules_change_revision(repo):
     commit = git(repo, "rev-parse", "--short=7", "HEAD")
     (repo / "src" / "generated").mkdir(parents=True)
     (repo / "src" / "generated" / "skip.py").write_text("skip = True\n")
-    assert get_revision() == commit
+    assert _get_revision() == commit
 
     (repo / "src" / "model.py").write_text("model = True\n")
-    revision = get_revision()
+    revision = _get_revision()
     assert revision.startswith(f"{commit}-dirty_")
     patch_path = resolve_and_open_run("experiment", "curve", {}).path.parent / "source.patch"
     patch = patch_path.read_text()
@@ -74,9 +74,9 @@ def test_untracked_files_and_include_rules_change_revision(repo):
 
     (repo / "src" / "model.py").unlink()
     git(repo, "apply", "--check", str(patch_path))
-    assert get_revision() == commit
+    assert _get_revision() == commit
     (repo / ".coordinatorinclude").write_text("src/**\n!src/generated/**\n# revised\n")
-    assert get_revision().startswith(f"{commit}-dirty_")
+    assert _get_revision().startswith(f"{commit}-dirty_")
     assert ".coordinatorinclude" in (resolve_and_open_run("other", "curve", {}).path.parent / "source.patch").read_text()
 
 
@@ -92,9 +92,9 @@ def test_git_ignored_tracked_file_is_excluded_and_nested_cwd_uses_root(repo, mon
     commit = git(repo, "rev-parse", "--short=7", "HEAD")
     monkeypatch.chdir(repo / "src")
     (repo / "src" / "ignored.py").write_text("changed\n")
-    assert get_revision() == commit
+    assert _get_revision() == commit
     (repo / "src" / "kept.py").write_text("changed\n")
-    assert get_revision().startswith(f"{commit}-dirty_")
+    assert _get_revision().startswith(f"{commit}-dirty_")
 
 
 @pytest.mark.parametrize("include_file", [False, True])
@@ -105,9 +105,9 @@ def test_missing_or_empty_include_file_tracks_all_nonignored_files(repo, include
         git(repo, "commit", "-qm", "Add empty include file")
     commit = git(repo, "rev-parse", "--short=7", "HEAD")
     (repo / "ignored.txt").write_text("ignored\n")
-    assert get_revision() == commit
+    assert _get_revision() == commit
     (repo / "new.txt").write_text("new\n")
-    assert get_revision().startswith(f"{commit}-dirty_")
+    assert _get_revision().startswith(f"{commit}-dirty_")
 
 
 def test_new_commit_creates_revision_and_existing_run_resumes(repo, monkeypatch):
@@ -123,7 +123,7 @@ def test_new_commit_creates_revision_and_existing_run_resumes(repo, monkeypatch)
 
     first = sweep([Run("curve", evaluate)], "size", [1], "experiment")["curve"]
     assert first.parent.name.startswith("first@")
-    assert json.loads((first / "meta.json").read_text())["revision"] == get_revision()
+    assert json.loads((first / "meta.json").read_text())["revision"] == _get_revision()
     monkeypatch.setenv("NEW_ATTEMPT_NAME", "second")
     resumed = sweep([Run("curve", evaluate)], "size", [1, 2], "experiment")["curve"]
     assert resumed == first

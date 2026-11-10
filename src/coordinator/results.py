@@ -37,7 +37,7 @@ import pathspec
 #
 
 
-def get_param_hash(params: dict) -> str:
+def _get_param_hash(params: dict) -> str:
     blob = json.dumps(params, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(blob.encode()).hexdigest()[:6]
 
@@ -76,24 +76,44 @@ def _get_patch() -> bytes:
     has_rules = any(line.strip() and not line.startswith("#") for line in rules)
     spec = pathspec.GitIgnoreSpec.from_lines(rules) if has_rules else None
 
-    tracked_changes = _nul_paths(_git_bytes("-C", root, "diff", "--name-only", "-z", "HEAD"))
-    untracked = _nul_paths(_git_bytes("-C", root, "ls-files", "--others", "--exclude-standard", "-z"))
+    tracked_changes = _nul_paths(
+        _git_bytes("-C", root, "diff", "--name-only", "-z", "HEAD")
+    )
+    untracked = _nul_paths(
+        _git_bytes("-C", root, "ls-files", "--others", "--exclude-standard", "-z")
+    )
     config_name = ".coordinatorinclude"
-    if include_path.exists() and config_name not in tracked_changes and config_name not in untracked:
+    if (
+        include_path.exists()
+        and config_name not in tracked_changes
+        and config_name not in untracked
+    ):
         if not _git_bytes("-C", root, "ls-files", "--error-unmatch", "--", config_name):
             untracked.append(config_name)
 
     candidates = sorted(set(tracked_changes + untracked) - {config_name})
     ignored = set()
     if candidates:
-        ignored = set(_nul_paths(_git_bytes(
-            "-C", root, "check-ignore", "--no-index", "-z", "--stdin",
-            input_data=b"\0".join(os.fsencode(path) for path in candidates) + b"\0",
-        )))
+        ignored = set(
+            _nul_paths(
+                _git_bytes(
+                    "-C",
+                    root,
+                    "check-ignore",
+                    "--no-index",
+                    "-z",
+                    "--stdin",
+                    input_data=b"\0".join(os.fsencode(path) for path in candidates)
+                    + b"\0",
+                )
+            )
+        )
 
-    selected = {path for path in candidates if path not in ignored and (
-        spec is None or spec.match_file(path)
-    )}
+    selected = {
+        path
+        for path in candidates
+        if path not in ignored and (spec is None or spec.match_file(path))
+    }
     if config_name in tracked_changes or config_name in untracked:
         selected.add(config_name)
 
@@ -102,11 +122,19 @@ def _get_patch() -> bytes:
     patch = b""
     if tracked_selected:
         patch = _git_bytes(
-            "-C", root, "diff", "--no-ext-diff", "--binary", "HEAD", "--",
+            "-C",
+            root,
+            "diff",
+            "--no-ext-diff",
+            "--binary",
+            "HEAD",
+            "--",
             *(f":(literal){path}" for path in tracked_selected),
         )
     for path in untracked_selected:
-        patch += _git_bytes("-C", root, "diff", "--no-index", "--binary", "--", "/dev/null", path)
+        patch += _git_bytes(
+            "-C", root, "diff", "--no-index", "--binary", "--", "/dev/null", path
+        )
     return patch
 
 
@@ -120,7 +148,7 @@ def _revision_and_patch() -> tuple[str, bytes]:
     return f"{commit}-dirty_{patch_hash}", patch
 
 
-def get_revision() -> str:
+def _get_revision() -> str:
     return _revision_and_patch()[0]
 
 
@@ -187,7 +215,7 @@ def resolve_and_open_run(
             revision_dir = candidate
             break
 
-    run_dir = revision_dir / f"{label}@{get_param_hash(params)}"
+    run_dir = revision_dir / f"{label}@{_get_param_hash(params)}"
     if run_dir.exists():
         return RunDir(run_dir)
 
