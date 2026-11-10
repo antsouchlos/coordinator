@@ -18,6 +18,7 @@ Layout:
 """
 
 import csv
+from dataclasses import dataclass
 import datetime
 import functools
 import hashlib
@@ -240,48 +241,14 @@ def resolve_and_open_run(
     return RunDir(run_dir)
 
 
-#
-#
-# Reading
-#
-#
+@dataclass
+class RunIdentifier:
+    run_params: dict
+    ...
 
 
-def load_experiment_runs(experiment: str, latest_only: bool = True) -> pd.DataFrame:
-    experiment_dir = get_results_root() / experiment
-
-    curves = {}
-    for run_dir in sorted(experiment_dir.glob("*/*@*")):
-        if run_dir.is_dir():
-            curves.setdefault(run_dir.name, []).append(run_dir)
-
-    frames = []
-    for curve, run_dirs in curves.items():
-        if latest_only:
-            run_dirs = [
-                max(
-                    run_dirs,
-                    key=lambda path: json.loads((path / "meta.json").read_text())[
-                        "started"
-                    ],
-                )
-            ]
-
-        for run_dir in run_dirs:
-            data_path = run_dir / "data.csv"
-            if not data_path.exists():
-                continue
-
-            frame = pd.read_csv(data_path)
-            frame["curve"] = curve
-            frame["label"] = curve.split("@")[0]
-            frame["revision"] = run_dir.parent.name.split("@")[-1]
-            frame["run"] = run_dir.parent.name
-            frames.append(frame)
-
-    if not frames:
-        raise FileNotFoundError(f"No runs found under {experiment_dir}")
-
-    return pd.concat(frames, ignore_index=True).sort_values(
-        ["curve", "run"], kind="stable"
-    )
+@dataclass
+class SweepIdentifier:
+    sweep_params: dict
+    sweep_axis: str
+    ...
