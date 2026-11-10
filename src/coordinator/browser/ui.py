@@ -15,7 +15,7 @@ from coordinator.browser import (
     rename_result,
     scan_results,
 )
-from coordinator.browser_settings import (
+from coordinator.browser.settings import (
     PANEL_DEFAULTS,
     default_settings,
     default_settings_path,
@@ -180,7 +180,7 @@ def launch_results_browser(
             "Install ipywidgets in this notebook's kernel (for example, pip install ipywidgets)."
         ) from exc
     try:
-        from coordinator.browser_widget import ResultsOverview
+        from coordinator.browser.widget import ResultsOverview
     except ImportError as exc:
         raise ImportError(
             "Install anywidget in this notebook's kernel (for example, pip install anywidget)."

@@ -1,7 +1,6 @@
 # One run swept over one axis.
 #
 #   python examples/01_basic.py
-#   coordinator-plot results/basic/*/* --y mean_error
 #
 # Set NEW_ATTEMPT_NAME to prefix a new results directory, e.g.
 #   NEW_ATTEMPT_NAME=first python examples/01_basic.py

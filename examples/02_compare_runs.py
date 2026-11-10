@@ -1,7 +1,6 @@
 # Several runs with different parameters simulated over the same axis.
 #
 #   python examples/02_compare_runs.py
-#   coordinator-plot results/compare-runs/*/* --y mean_error
 
 import random
 

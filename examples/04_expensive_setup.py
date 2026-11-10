@@ -5,7 +5,6 @@
 # built once per axis value and reused by every run.
 #
 #   python examples/04_expensive_setup.py
-#   coordinator-plot results/expensive-setup/*/* --y mean_error
 
 import functools
 import random

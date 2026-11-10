@@ -1,7 +1,6 @@
-# Returning an error estimate alongside the metric, on a log-spaced axis.
+# Returning an error estimate alongside the metric.
 #
 #   python examples/03_error_bars.py
-#   coordinator-plot results/error-bars/*/* --y mean_error --yerr mean_error_err --logx --logy
 
 import math
 import random

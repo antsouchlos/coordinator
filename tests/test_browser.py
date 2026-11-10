@@ -126,7 +126,7 @@ def test_nested_overview_search_refresh_and_patch(tmp_path):
     meta_path.write_text(json.dumps(metadata))
     write_run(tmp_path, "exp", "try-one@aaa1111", "second")
     write_run(tmp_path, "exp", "bbb2222", "third")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
     dashboard = launch_results_browser(tmp_path)
     search, refresh = dashboard.children[2].children
     overview = dashboard.children[5]
@@ -158,7 +158,7 @@ def test_overview_preserves_valid_runs_when_metadata_is_invalid(tmp_path):
     write_run(tmp_path, "exp", "aaa1111", "good")
     bad = write_run(tmp_path, "exp", "aaa1111", "bad")
     (bad / "meta.json").write_text("{broken")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     assert "1 run" in dashboard.children[3].value
@@ -224,7 +224,7 @@ def test_overview_actions_rescan_and_report_errors(tmp_path):
     pytest.importorskip("ipywidgets")
     write_run(tmp_path, "exp", "aaa1111", "curve")
     write_run(tmp_path, "taken", "bbb2222", "other")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     overview = dashboard.children[5]
@@ -243,7 +243,7 @@ def test_selection_plots_runs_across_experiments_and_changes_metric(tmp_path):
     pytest.importorskip("ipywidgets")
     first = write_run(tmp_path, "exp-a", "aaa1111", "curve")
     second = write_run(tmp_path, "exp-b", "bbb2222", "curve")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     plot_area, overview = dashboard.children[1], dashboard.children[5]
@@ -288,7 +288,7 @@ def test_attempt_selection_includes_hidden_runs_and_shows_partial_state(tmp_path
     pytest.importorskip("ipywidgets")
     first = write_run(tmp_path, "exp", "try@aaa1111", "first")
     second = write_run(tmp_path, "exp", "try@aaa1111", "second")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     search, _ = dashboard.children[2].children
@@ -309,7 +309,7 @@ def test_attempt_selection_includes_hidden_runs_and_shows_partial_state(tmp_path
 def test_selection_survives_rename_and_refresh_and_drops_deleted_runs(tmp_path):
     pytest.importorskip("ipywidgets")
     first = write_run(tmp_path, "exp", "try@aaa1111", "first")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     _, refresh = dashboard.children[2].children
@@ -329,7 +329,7 @@ def test_selection_survives_rename_and_refresh_and_drops_deleted_runs(tmp_path):
 def test_selection_follows_attempt_and_run_renames_then_delete(tmp_path):
     pytest.importorskip("ipywidgets")
     first = write_run(tmp_path, "exp", "try@aaa1111", "first")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     overview = dashboard.children[5]
@@ -349,7 +349,7 @@ def test_incompatible_selection_keeps_checkboxes_and_shows_message(tmp_path):
     pytest.importorskip("ipywidgets")
     first = write_run(tmp_path, "exp", "aaa1111", "first")
     second = write_run(tmp_path, "exp", "bbb2222", "second", axis="time", rows={"time": [1, 2], "other": [2, 3]})
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     plot_area, overview = dashboard.children[1], dashboard.children[5]
@@ -363,7 +363,7 @@ def test_no_shared_metric_keeps_selection_and_shows_message(tmp_path):
     pytest.importorskip("ipywidgets")
     first = write_run(tmp_path, "exp", "aaa1111", "first")
     second = write_run(tmp_path, "exp", "bbb2222", "second", rows={"noise": [1, 2], "other": [2, 3]})
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     plot_area, overview = dashboard.children[1], dashboard.children[5]
@@ -380,7 +380,7 @@ def test_browser_settings_save_and_restore_exact_view(tmp_path):
     notebook = tmp_path / "notebooks" / "results_browser.ipynb"
     notebook.parent.mkdir()
     notebook.write_text("{}")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(results)
     plot_area, overview = dashboard.children[1], dashboard.children[5]
@@ -444,7 +444,7 @@ def test_browser_settings_save_and_restore_exact_view(tmp_path):
 def test_settings_paths_follow_rename_and_delete(tmp_path):
     pytest.importorskip("ipywidgets")
     run = write_run(tmp_path, "exp", "try@aaa1111", "curve")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     settings_file = tmp_path / "custom-view.json"
     dashboard = launch_results_browser(tmp_path, settings_path=settings_file)
@@ -467,7 +467,7 @@ def test_settings_paths_follow_rename_and_delete(tmp_path):
 def test_invalid_settings_warn_without_overwriting_file(tmp_path):
     pytest.importorskip("ipywidgets")
     run = write_run(tmp_path, "exp", "aaa1111", "curve")
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     settings_file = tmp_path / "invalid.json"
     settings_file.write_text("{broken")
@@ -482,7 +482,7 @@ def test_invalid_settings_warn_without_overwriting_file(tmp_path):
 def test_settings_write_failure_warns_and_keeps_browser_usable(tmp_path, monkeypatch):
     pytest.importorskip("ipywidgets")
     run = write_run(tmp_path, "exp", "aaa1111", "curve")
-    from coordinator import browser_ui
+    from coordinator.browser import ui as browser_ui
 
     def fail_save(_path, _settings):
         raise PermissionError("read only")
@@ -498,7 +498,7 @@ def test_settings_write_failure_warns_and_keeps_browser_usable(tmp_path, monkeyp
 def test_log_controls_show_error_and_allow_recovery(tmp_path):
     pytest.importorskip("ipywidgets")
     run = write_run(tmp_path, "exp", "aaa1111", "curve", rows={"noise": [0, 1], "score": [2, -1]})
-    from coordinator.browser_ui import launch_results_browser
+    from coordinator.browser.ui import launch_results_browser
 
     dashboard = launch_results_browser(tmp_path)
     plot_area, overview = dashboard.children[1], dashboard.children[5]
