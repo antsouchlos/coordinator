@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from coordinator.results import resolve_and_open_run
 
@@ -18,31 +19,38 @@ def sweep(
     experiment: str,
     shared: dict | None = None,
     meta: dict | None = None,
-) -> dict:
+) -> list[Path]:
     """
     Evaluate every (run, axis value) point not yet stored in its run directory.
 
     Each run's `evaluate` receives `{**shared, **run.params, axis: value}` and
     returns the metrics stored alongside it. Axis values form the outer loop
     and runs the inner one, so an evaluator may cache setup that depends only
-    on `shared` and the axis value.
+    on `shared` and the axis value. Return result paths in input-run order.
+    Runs with the same axis and effective fixed parameters share one result;
+    the first matching run evaluates missing points.
     """
 
-    shared = shared or {}
-    run_dirs = {
-        run.label: resolve_and_open_run(
+    shared = shared if shared is not None else {}
+    run_dirs = [
+        resolve_and_open_run(
             experiment,
             run.label,
-            {key: value for key, value in run.params.items() if key != axis},
-            {"axis": axis, "shared": shared, **(meta or {})},
+            run.params,
+            axis,
+            shared,
+            meta,
         )
         for run in runs
-    }
+    ]
 
     for value in axis_values:
-        for run in runs:
+        processed = set()
+        for run, run_dir in zip(runs, run_dirs):
+            if run_dir.path in processed:
+                continue
+            processed.add(run_dir.path)
             point = {**shared, **run.params, axis: value}
-            run_dir = run_dirs[run.label]
             if run_dir.has_row(point):
                 print(f"{run.label}, {axis}: {value}, already done")
                 continue
@@ -53,4 +61,4 @@ def sweep(
             formatted = ", ".join(f"{key}: {metric}" for key, metric in metrics.items())
             print(f"{run.label}, {axis}: {value}, {formatted}")
 
-    return {label: run_dir.path for label, run_dir in run_dirs.items()}
+    return [run_dir.path for run_dir in run_dirs]

@@ -11,7 +11,7 @@ Results directory structure:
 ```
 results/<experiment>/[<attempt>@]<commit>[-dirty_<patch_hash>]/
     source.patch           # only when the worktree was dirty
-    <label>@<param_hash>/
+    <label>@<identity_hash>/
         data.csv
         meta.json
 ```

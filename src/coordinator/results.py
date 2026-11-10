@@ -3,7 +3,7 @@ Layout:
 
     <git toplevel>/results/<experiment>/[<attempt>@]<commit>[-dirty_<patch_hash>]/
         source.patch      # only when the worktree was dirty
-        <label>@<param_hash>/
+        <label>@<identity_hash>/
             data.csv
             meta.json
 
@@ -15,14 +15,16 @@ Layout:
   Existing directories are matched by revision, ignoring the attempt name.
 - If matching runs already exist, datapoints are appended instead of
   recomputed.
+- Run identity covers the axis and effective fixed parameters, regardless of
+  the label. The hash suffix uses 16 hexadecimal characters.
 """
 
 import csv
-from dataclasses import dataclass
 import datetime
 import functools
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -38,9 +40,33 @@ import pathspec
 #
 
 
-def _get_param_hash(params: dict) -> str:
-    blob = json.dumps(params, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(blob.encode()).hexdigest()[:6]
+def _validate_identity_value(value, location: str) -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{location} must be a finite JSON value")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_identity_value(item, f"{location}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"{location} keys must be strings")
+            _validate_identity_value(item, f"{location}.{key}")
+        return
+    raise TypeError(f"{location} must contain only JSON-compatible values")
+
+
+def _identity_blob(identity: dict) -> str:
+    _validate_identity_value(identity, "run identity")
+    return json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _get_identity_hash(identity: dict) -> str:
+    return hashlib.sha256(_identity_blob(identity).encode()).hexdigest()[:16]
 
 
 def _run_git_cmd(*args: str) -> str:
@@ -205,8 +231,36 @@ class RunDir:
 
 
 def resolve_and_open_run(
-    experiment: str, label: str, params: dict, meta=None
+    experiment: str,
+    label: str,
+    params: dict,
+    axis: str,
+    shared: dict | None = None,
+    meta: dict | None = None,
 ) -> RunDir:
+    if not isinstance(axis, str) or not axis:
+        raise ValueError("axis must be a nonempty string")
+    shared = shared if shared is not None else {}
+    fixed_params = {**shared, **params}
+    fixed_params.pop(axis, None)
+    identity = {"axis": axis, "params": fixed_params}
+    identity_blob = _identity_blob(identity)
+    identity_hash = _get_identity_hash(identity)
+    reserved = {
+        "experiment",
+        "label",
+        "params",
+        "shared",
+        "axis",
+        "identity",
+        "revision",
+        "started",
+        "argv",
+    }
+    if meta and reserved.intersection(meta):
+        names = ", ".join(sorted(reserved.intersection(meta)))
+        raise ValueError(f"meta cannot override reserved fields: {names}")
+
     experiment_dir = get_results_root() / experiment
     revision, patch = _revision_and_patch()
     attempt = os.environ.get("NEW_ATTEMPT_NAME", "")
@@ -216,20 +270,40 @@ def resolve_and_open_run(
             revision_dir = candidate
             break
 
-    run_dir = revision_dir / f"{label}@{_get_param_hash(params)}"
-    if run_dir.exists():
+    matching = sorted(
+        candidate
+        for candidate in revision_dir.glob(f"*@{identity_hash}")
+        if candidate.is_dir()
+    )
+    if len(matching) > 1:
+        raise ValueError(f"Multiple run directories match identity {identity_hash}")
+    if matching:
+        run_dir = matching[0]
+        try:
+            stored_identity = json.loads((run_dir / "meta.json").read_text())[
+                "identity"
+            ]
+            if _identity_blob(stored_identity) != identity_blob:
+                raise ValueError("stored identity differs")
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Cannot reuse {run_dir}: invalid run identity") from exc
         return RunDir(run_dir)
+
+    run_dir = revision_dir / f"{label}@{identity_hash}"
 
     run_dir.mkdir(parents=True)
 
     full_meta = {
+        **(meta or {}),
         "experiment": experiment,
         "label": label,
         "params": params,
+        "shared": shared,
+        "axis": axis,
+        "identity": identity,
         "revision": revision,
         "started": datetime.datetime.now().isoformat(timespec="seconds"),
         "argv": sys.argv,
-        **(meta or {}),
     }
     with open(run_dir / "meta.json", "w") as handle:
         json.dump(full_meta, handle, indent=2, sort_keys=True, default=str)
@@ -239,16 +313,3 @@ def resolve_and_open_run(
         patch_path.write_bytes(patch)
 
     return RunDir(run_dir)
-
-
-@dataclass
-class RunIdentifier:
-    run_params: dict
-    ...
-
-
-@dataclass
-class SweepIdentifier:
-    sweep_params: dict
-    sweep_axis: str
-    ...
