@@ -1,15 +1,20 @@
-"""Persistent view settings for the results browser."""
-
 import json
 import os
 import stat
 import tempfile
 from pathlib import Path, PurePosixPath
 
-PANEL_DEFAULTS = {"experiment": True, "attempt": True, "patch": True, "data": False, "metadata": False}
+PANEL_DEFAULTS = {
+    "experiment": True,
+    "attempt": True,
+    "sweep": True,
+    "patch": True,
+    "data": False,
+    "metadata": False,
+}
 
 
-def default_settings() -> dict:
+def make_default_settings() -> dict:
     return {
         "version": 1,
         "plot": {"metric": None, "logx": False, "logy": False},
@@ -18,7 +23,7 @@ def default_settings() -> dict:
     }
 
 
-def default_settings_path(results_root: Path) -> Path:
+def get_default_settings_path(results_root: Path) -> Path:
     """Use the project notebook when present, otherwise the results directory."""
     notebook = results_root.parent / "notebooks" / "results_browser.ipynb"
     if notebook.is_file():
@@ -26,7 +31,7 @@ def default_settings_path(results_root: Path) -> Path:
     return results_root / ".results_browser.settings.json"
 
 
-def _valid_relative_path(value: object) -> bool:
+def _is_valid_relative_path(value: object) -> bool:
     if not isinstance(value, str) or not value:
         return False
     path = PurePosixPath(value)
@@ -41,7 +46,7 @@ def _valid_relative_path(value: object) -> bool:
 def load_settings(path: Path) -> dict:
     """Read and validate a versioned browser settings file."""
     if not path.exists():
-        return default_settings()
+        return make_default_settings()
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("version") != 1:
         raise ValueError("Expected a version 1 settings object.")
@@ -55,13 +60,13 @@ def load_settings(path: Path) -> dict:
     metric = plot.get("metric")
     if metric is not None and not isinstance(metric, str):
         raise ValueError("Plot metric must be a string or null.")
-    if not all(_valid_relative_path(item) for item in selected):
+    if not all(_is_valid_relative_path(item) for item in selected):
         raise ValueError("Selected runs must have relative paths.")
     if set(panels) - set(PANEL_DEFAULTS):
         raise ValueError("Settings contain an unknown panel type.")
     for kind in PANEL_DEFAULTS:
         items = panels.get(kind, {})
-        if not isinstance(items, dict) or any(not _valid_relative_path(key) or not isinstance(value, bool) for key, value in items.items()):
+        if not isinstance(items, dict) or any(not _is_valid_relative_path(key) or not isinstance(value, bool) for key, value in items.items()):
             raise ValueError(f"Invalid {kind} panel settings.")
     return {
         "version": 1,
@@ -89,14 +94,23 @@ def save_settings(path: Path, settings: dict) -> None:
 
 
 def remap_paths(settings: dict, old: str, new: str | None) -> None:
-    """Update saved run and panel paths after a rename or delete."""
-    def remap(value):
+    def remap_path(value):
         if value != old and not value.startswith(f"{old}/"):
             return value
         return None if new is None else new + value[len(old):]
 
-    settings["selected_runs"] = sorted({updated for value in settings["selected_runs"] if (updated := remap(value)) is not None})
+    settings["selected_runs"] = sorted(
+        {
+            updated
+            for value in settings["selected_runs"]
+            if (updated := remap_path(value)) is not None
+        }
+    )
     for panels in settings["panels"].values():
-        updated = {mapped: state for value, state in panels.items() if (mapped := remap(value)) is not None}
+        updated = {
+            mapped: state
+            for value, state in panels.items()
+            if (mapped := remap_path(value)) is not None
+        }
         panels.clear()
         panels.update(updated)

@@ -1,12 +1,8 @@
-# Returning an error estimate alongside the metric.
-#
-#   python examples/03_error_bars.py
-
 import math
 import random
 import statistics
 
-from coordinator import Run, sweep
+from coordinator import Experiment, Run, Sweep, run
 
 
 def evaluate(point):
@@ -17,14 +13,11 @@ def evaluate(point):
     }
 
 
-def main():
-    sweep(
-        [Run("gaussian", evaluate)],
-        axis="noise",
-        axis_values=[10**exponent for exponent in range(-3, 1)],
-        experiment="error-bars",
-    )
-
+def run_example():
+    run(Experiment("error-bars", [Sweep(
+        params={}, axis_name="noise", axis_vals=[10**exponent for exponent in range(-3, 1)],
+        runs=[Run(params={}, evaluator_func=evaluate)],
+    )]))
 
 if __name__ == "__main__":
-    main()
+    run_example()

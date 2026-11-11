@@ -1,265 +1,203 @@
+import hashlib
 import json
 import math
 import subprocess
 
+import pandas as pd
 import pytest
 
-from coordinator import Run, results, sweep
-from coordinator.browser import rename_result
-from coordinator.results import _get_revision, get_results_root, resolve_and_open_run
+from coordinator import Experiment, Run, Sweep, run
+from coordinator.api import AttemptId, RunId, SweepId
+from coordinator.browser import rename_result, scan_results
+from coordinator.git import get_repository_root, get_revision_and_patch
+from coordinator.results import get_results_root
 
 
-def git(repo, *args):
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+def run_git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
-@pytest.fixture
-def repo(tmp_path, monkeypatch):
-    git(tmp_path, "init", "-q")
-    git(tmp_path, "config", "user.name", "Test")
-    git(tmp_path, "config", "user.email", "test@example.com")
-    (tmp_path / ".gitignore").write_text("ignored.txt\nresults/\n")
+@pytest.fixture(name="repo")
+def create_repo(tmp_path, monkeypatch):
+    run_git(tmp_path, "init", "-q")
+    run_git(tmp_path, "config", "user.name", "Test")
+    run_git(tmp_path, "config", "user.email", "test@example.com")
+    (tmp_path / ".gitignore").write_text("results/\n")
     (tmp_path / "keep.txt").write_text("original\n")
     (tmp_path / "skip.txt").write_text("original\n")
-    git(tmp_path, "add", ".gitignore", "keep.txt", "skip.txt")
-    git(tmp_path, "commit", "-qm", "Initial")
+    (tmp_path / ".coordinatorinclude").write_text("keep.txt\n")
+    run_git(tmp_path, "add", ".")
+    run_git(tmp_path, "commit", "-qm", "Initial")
     monkeypatch.chdir(tmp_path)
     get_results_root.cache_clear()
     yield tmp_path
     get_results_root.cache_clear()
 
 
-def test_include_rules_scope_dirty_hash_and_patch(repo):
-    (repo / ".coordinatorinclude").write_text("*.txt\n!skip.txt\n")
-    git(repo, "add", ".coordinatorinclude")
-    git(repo, "commit", "-qm", "Add include rules")
-    commit = git(repo, "rev-parse", "--short=7", "HEAD")
+def make_experiment(axis_vals=(1, 2), sweep_params=None, run_params=None, calls=None):
+    calls = calls if calls is not None else []
 
-    (repo / "skip.txt").write_text("changed\n")
-    (repo / "ignored.txt").write_text("ignored\n")
-    assert _get_revision() == commit
+    def evaluate(point):
+        calls.append(dict(point))
+        return {"score": point["size"] * 2}
 
-    (repo / "keep.txt").write_text("changed\n")
-    revision = _get_revision()
-    assert revision.startswith(f"{commit}-dirty_")
-    run = resolve_and_open_run("experiment", "curve", {}, "size")
-    patch = (run.path.parent / "source.patch").read_text()
-    assert "keep.txt" in patch
-    assert "skip.txt" not in patch
-    assert "ignored.txt" not in patch
-
-    (repo / "keep.txt").write_text("changed again\n")
-    assert _get_revision() != revision
+    return Experiment("example", [Sweep(sweep_params or {"bias": 1}, "size", axis_vals, [Run(run_params or {"power": 2}, evaluate)])])
 
 
-def test_untracked_files_and_include_rules_change_revision(repo):
-    (repo / ".coordinatorinclude").write_text("src/**\n!src/generated/**\n")
-    git(repo, "add", ".coordinatorinclude")
-    git(repo, "commit", "-qm", "Add include rules")
-    commit = git(repo, "rev-parse", "--short=7", "HEAD")
-    (repo / "src" / "generated").mkdir(parents=True)
-    (repo / "src" / "generated" / "skip.py").write_text("skip = True\n")
-    assert _get_revision() == commit
+def test_ids_depend_on_full_axis_list_and_parameters(repo):
+    base = make_experiment()
+    other_values = make_experiment(axis_vals=(1, 2, 3))
+    other_sweep = make_experiment(sweep_params={"bias": 2})
+    other_run = make_experiment(run_params={"power": 3})
+    assert base._id.value() == run_git(repo, "rev-parse", "--short=7", "HEAD")
+    assert len(base._sweeps[0]._id.value()) == len(base._sweeps[0]._runs[0]._id.value()) == 64
+    assert other_values._sweeps[0]._id.value() != base._sweeps[0]._id.value()
+    assert other_values._sweeps[0]._runs[0]._id.value() != base._sweeps[0]._runs[0]._id.value()
+    assert other_sweep._sweeps[0]._id.value() != base._sweeps[0]._id.value()
+    assert other_run._sweeps[0]._id.value() == base._sweeps[0]._id.value()
+    assert other_run._sweeps[0]._runs[0]._id.value() != base._sweeps[0]._runs[0]._id.value()
 
-    (repo / "src" / "model.py").write_text("model = True\n")
-    revision = _get_revision()
-    assert revision.startswith(f"{commit}-dirty_")
-    patch_path = (
-        resolve_and_open_run("experiment", "curve", {}, "size").path.parent
-        / "source.patch"
-    )
-    patch = patch_path.read_text()
-    assert "src/model.py" in patch
-    assert "src/generated/skip.py" not in patch
-
-    (repo / "src" / "model.py").unlink()
-    git(repo, "apply", "--check", str(patch_path))
-    assert _get_revision() == commit
-    (repo / ".coordinatorinclude").write_text("src/**\n!src/generated/**\n# revised\n")
-    assert _get_revision().startswith(f"{commit}-dirty_")
-    assert (
-        ".coordinatorinclude"
-        in (
-            resolve_and_open_run("other", "curve", {}, "size").path.parent
-            / "source.patch"
-        ).read_text()
-    )
-
-
-def test_git_ignored_tracked_file_is_excluded_and_nested_cwd_uses_root(
-    repo, monkeypatch
-):
-    (repo / ".coordinatorinclude").write_text("src/**\n")
-    (repo / "src").mkdir()
-    (repo / "src" / ".gitignore").write_text("ignored.py\n")
-    (repo / "src" / "ignored.py").write_text("original\n")
-    (repo / "src" / "kept.py").write_text("original\n")
-    git(repo, "add", ".coordinatorinclude", "src/.gitignore", "src/kept.py")
-    git(repo, "add", "-f", "src/ignored.py")
-    git(repo, "commit", "-qm", "Add source files")
-    commit = git(repo, "rev-parse", "--short=7", "HEAD")
-    monkeypatch.chdir(repo / "src")
-    (repo / "src" / "ignored.py").write_text("changed\n")
-    assert _get_revision() == commit
-    (repo / "src" / "kept.py").write_text("changed\n")
-    assert _get_revision().startswith(f"{commit}-dirty_")
+    sweep = base._sweeps[0]
+    sweep_payload = {
+        "experiment_id": base._id.value(),
+        "axis_name": "size",
+        "axis_values": [1, 2],
+        "params": {"bias": 1},
+    }
+    expected_sweep_id = hashlib.sha256(
+        json.dumps(sweep_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    run_payload = {"params": {"power": 2}, "sweep_id": expected_sweep_id}
+    expected_run_id = hashlib.sha256(
+        json.dumps(run_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    assert isinstance(base._id, AttemptId)
+    assert isinstance(sweep._id, SweepId)
+    assert isinstance(sweep._runs[0]._id, RunId)
+    assert sweep._id.value() == expected_sweep_id
+    assert sweep._runs[0]._id.value() == expected_run_id
 
 
-@pytest.mark.parametrize("include_file", [False, True])
-def test_missing_or_empty_include_file_tracks_all_nonignored_files(repo, include_file):
-    if include_file:
-        (repo / ".coordinatorinclude").write_text("")
-        git(repo, "add", ".coordinatorinclude")
-        git(repo, "commit", "-qm", "Add empty include file")
-    commit = git(repo, "rev-parse", "--short=7", "HEAD")
-    (repo / "ignored.txt").write_text("ignored\n")
-    assert _get_revision() == commit
-    (repo / "new.txt").write_text("new\n")
-    assert _get_revision().startswith(f"{commit}-dirty_")
+def test_duplicate_ids_and_parameter_overlap_rejected(repo):
+    evaluator = lambda _: {"score": 1}
+    with pytest.raises(ValueError, match="duplicate sweep or run ID"):
+        Experiment("x", [Sweep({}, "size", [1], [Run({}, evaluator)]), Sweep({}, "size", [1], [Run({}, evaluator)])])
+    with pytest.raises(ValueError, match="duplicate sweep or run ID"):
+        Experiment("x", [Sweep({}, "size", [1], [Run({}, evaluator), Run({}, evaluator)])])
+    for sweep_params, run_params in [({"size": 1}, {}), ({}, {"size": 1}), ({"bias": 1}, {"bias": 2})]:
+        with pytest.raises(ValueError, match="overlap"):
+            Sweep(sweep_params, "size", [1], [Run(run_params, evaluator)])
+    for value in [math.nan, math.inf, object(), {1: "bad"}, (1, 2)]:
+        with pytest.raises((TypeError, ValueError)):
+            Experiment("x", [Sweep({}, "size", [1], [Run({"bad": value}, evaluator)])])
 
 
-def test_new_commit_creates_revision_and_existing_run_resumes(repo, monkeypatch):
-    (repo / ".coordinatorinclude").write_text("keep.txt\n")
-    git(repo, "add", ".coordinatorinclude")
-    git(repo, "commit", "-qm", "Add include rules")
+def test_constructors_retain_inputs_and_copy_runs(repo):
+    run_params = {"power": 2}
+    sweep_params = {"bias": 1}
+    axis_vals = [1, 2]
+    original_run = Run(run_params, lambda point: {"score": point["size"]})
+    sweep = Sweep(sweep_params, "size", axis_vals, [original_run])
+    experiment = Experiment("example", [sweep])
+
+    assert original_run._params is run_params
+    assert sweep._params is sweep_params
+    assert sweep._axis_vals is axis_vals
+    assert sweep._runs[0] is not original_run
+    assert sweep._runs[0]._params is not run_params
+    assert original_run._id is None
+    assert experiment._sweeps[0] is not sweep
+    assert experiment._id.value() == run_git(repo, "rev-parse", "--short=7", "HEAD")
+
+
+def test_layout_execution_order_resume_and_cosmetic_rename(repo, monkeypatch):
     monkeypatch.setenv("NEW_ATTEMPT_NAME", "first")
-    evaluations = []
-
+    calls = []
     def evaluate(point):
-        evaluations.append(point["size"])
-        return {"score": point["size"]}
-
-    first = sweep([Run("curve", evaluate)], "size", [1], "experiment")[0]
-    assert first.parent.name.startswith("first@")
-    assert json.loads((first / "meta.json").read_text())["revision"] == _get_revision()
+        calls.append((point["size"], point["power"], point["bias"]))
+        return {"score": point["size"] + point["power"]}
+    sweep = Sweep({"bias": 1}, "size", [1, 2], [Run({"power": 2}, evaluate), Run({"power": 3}, evaluate)])
+    experiment = Experiment("example", [sweep])
+    assert run(experiment) is None
+    assert calls == [(1, 2, 1), (1, 3, 1), (2, 2, 1), (2, 3, 1)]
+    attempt = get_results_root() / "example" / f"first@{experiment._id.value()}"
+    owned_sweep = experiment._sweeps[0]
+    sweep_path = attempt / owned_sweep._id.value()
+    first = sweep_path / owned_sweep._runs[0]._id.value()
+    assert first.is_dir()
+    assert list(pd.read_csv(first / "data.csv")["size"]) == [1, 2]
+    metadata = json.loads((first / "metadata.json").read_text())
+    assert metadata["axis_vals"] == [1, 2]
+    assert metadata["sweep_params"] == {"bias": 1}
+    assert metadata["run_params"] == {"power": 2}
+    renamed_sweep = rename_result(get_results_root(), "sweep", sweep_path, "named")
+    renamed_run = rename_result(get_results_root(), "run", renamed_sweep / first.name, "curve")
     monkeypatch.setenv("NEW_ATTEMPT_NAME", "second")
-    resumed = sweep([Run("curve", evaluate)], "size", [1, 2], "experiment")[0]
-    assert resumed == first
-    assert evaluations == [1, 2]
-
-    (repo / "skip.txt").write_text("unrelated committed change\n")
-    git(repo, "add", "skip.txt")
-    git(repo, "commit", "-qm", "Change excluded file")
-    second = sweep([Run("curve", evaluate)], "size", [1], "experiment")[0]
-    assert second.parent.name.startswith("second@")
-    assert second.parent != first.parent
-    assert evaluations == [1, 2, 1]
+    run(experiment)
+    assert len(calls) == 4
+    assert renamed_run.exists()
+    assert len(list((get_results_root() / "example").iterdir())) == 1
+    indexed, warnings = scan_results(get_results_root())
+    assert len(indexed) == 2 and not warnings
+    assert indexed[0].patch_path is None
 
 
-def test_identity_includes_axis_and_effective_fixed_params(repo):
-    def evaluate(point):
-        return {"score": point.get("size", point.get("width"))}
-
-    first = sweep(
-        [Run("curve", evaluate, {"power": 2})],
-        "size",
-        [1],
-        "experiment",
-        shared={"bias": 1, "power": 0, "size": 99},
-    )[0]
-    same = sweep(
-        [Run("renamed", evaluate, {"power": 2})],
-        "size",
-        [1, 2],
-        "experiment",
-        shared={"bias": 1, "power": 9, "size": 88},
-    )[0]
-    changed_shared = sweep(
-        [Run("curve", evaluate, {"power": 2})],
-        "size",
-        [1],
-        "experiment",
-        shared={"bias": 2},
-    )[0]
-    changed_axis = sweep(
-        [Run("curve", evaluate, {"power": 2})],
-        "width",
-        [1],
-        "experiment",
-        shared={"bias": 1},
-    )[0]
-
-    assert same == first
-    assert changed_shared != first
-    assert changed_axis != first
-    assert len(first.name.rsplit("@", 1)[-1]) == 16
-    assert len((first / "data.csv").read_text().splitlines()) == 3
-    metadata = json.loads((first / "meta.json").read_text())
-    assert metadata["label"] == "curve"
-    assert metadata["identity"] == {"axis": "size", "params": {"bias": 1, "power": 2}}
+def test_attempt_changes_with_git_commit_and_selected_patch(repo):
+    first = make_experiment()
+    run(first)
+    first_attempt = first._id.value()
+    (repo / "skip.txt").write_text("excluded change\n")
+    assert make_experiment()._id.value() == first_attempt
+    (repo / "keep.txt").write_text("selected change\n")
+    run(first)
+    assert first._id.value() == first_attempt
+    assert [path.name for path in (get_results_root() / "example").iterdir()] == [
+        first_attempt
+    ]
+    second = make_experiment()
+    run(second)
+    assert second._id.value() != first_attempt and "-dirty_" in second._id.value()
+    patch = get_results_root() / "example" / second._id.value() / "source.patch"
+    assert "keep.txt" in patch.read_text()
+    assert "skip.txt" not in patch.read_text()
+    run_git(repo, "add", "keep.txt")
+    run_git(repo, "commit", "-qm", "New code")
+    third = make_experiment()
+    run(third)
+    assert third._id.value() not in {first_attempt, second._id.value()}
 
 
-def test_duplicate_labels_have_distinct_paths_and_same_identity_runs_once(repo):
+def test_axis_list_change_creates_new_run(repo):
+    first = make_experiment((1, 2))
+    run(first)
+    second = make_experiment((1, 2, 3))
+    run(second)
+    assert first._sweeps[0]._runs[0]._id.value() != second._sweeps[0]._runs[0]._id.value()
+    assert len(list((get_results_root() / "example" / first._id.value()).iterdir())) == 2
+
+
+def test_multiple_sweeps_run_in_input_order(repo):
     calls = []
 
     def evaluate(point):
-        calls.append(point["power"])
-        return {"score": point["power"]}
+        calls.append((point["bias"], point["size"], point["power"]))
+        return {"score": len(calls)}
 
-    paths = sweep(
-        [
-            Run("curve", evaluate, {"power": 1}),
-            Run("curve", evaluate, {"power": 2}),
-            Run("alias", evaluate, {"power": 1}),
-        ],
-        "size",
-        [1, 2],
-        "experiment",
-    )
-
-    assert len(paths) == 3
-    assert paths[0] != paths[1]
-    assert paths[0] == paths[2]
-    assert calls == [1, 2, 1, 2]
+    experiment = Experiment("ordered", [
+        Sweep({"bias": 1}, "size", [1, 2], [Run({"power": 1}, evaluate), Run({"power": 2}, evaluate)]),
+        Sweep({"bias": 2}, "size", [3], [Run({"power": 1}, evaluate)]),
+    ])
+    run(experiment)
+    assert calls == [(1, 1, 1), (1, 1, 2), (1, 2, 1), (1, 2, 2), (2, 3, 1)]
+    assert len(scan_results(get_results_root())[0]) == 3
 
 
-def test_renamed_run_is_reused_by_identity(repo):
-    calls = []
-
-    def evaluate(point):
-        calls.append(point["size"])
-        return {"score": point["size"]}
-
-    original = sweep([Run("old", evaluate)], "size", [1], "experiment")[0]
-    renamed = rename_result(get_results_root(), "run", original, "new")
-    reused = sweep([Run("another", evaluate)], "size", [1, 2], "experiment")[0]
-
-    assert reused == renamed
-    assert calls == [1, 2]
-    assert json.loads((renamed / "meta.json").read_text())["label"] == "new"
-
-
-@pytest.mark.parametrize("value", [math.nan, math.inf, object(), {1: "bad"}, (1, 2)])
-def test_non_json_identity_values_are_rejected(repo, value):
-    with pytest.raises((TypeError, ValueError)):
-        sweep(
-            [Run("curve", lambda point: {}, {"bad": value})], "size", [1], "experiment"
-        )
-    assert not get_results_root().exists()
-
-
-def test_meta_cannot_override_identity(repo):
-    with pytest.raises(ValueError, match="reserved fields: axis"):
-        sweep(
-            [Run("curve", lambda point: {})],
-            "size",
-            [1],
-            "experiment",
-            meta={"axis": "other"},
-        )
-    assert not get_results_root().exists()
-
-
-def test_existing_run_identity_is_verified_before_reuse(repo, monkeypatch):
-    monkeypatch.setattr(results, "_get_identity_hash", lambda identity: "a" * 16)
-    first = resolve_and_open_run("experiment", "curve", {"power": 1}, "size")
-
-    with pytest.raises(ValueError, match="invalid run identity"):
-        resolve_and_open_run("experiment", "curve", {"power": 2}, "size")
-
-    assert len(list(first.path.parent.iterdir())) == 1
+def test_git_fallback_outside_repository(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    get_results_root.cache_clear()
+    try:
+        assert get_repository_root() is None
+        assert get_revision_and_patch() == ("nogit", b"")
+        assert get_results_root() == tmp_path / "results"
+    finally:
+        get_results_root.cache_clear()

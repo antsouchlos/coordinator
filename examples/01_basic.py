@@ -1,13 +1,6 @@
-# One run swept over one axis.
-#
-#   python examples/01_basic.py
-#
-# Set NEW_ATTEMPT_NAME to prefix a new results directory, e.g.
-#   NEW_ATTEMPT_NAME=first python examples/01_basic.py
-
 import random
 
-from coordinator import Run, sweep
+from coordinator import Experiment, Run, Sweep, run
 
 
 def evaluate(point):
@@ -15,14 +8,13 @@ def evaluate(point):
     return {"mean_error": sum(errors) / len(errors)}
 
 
-def main():
-    sweep(
-        [Run("gaussian", evaluate)],
-        axis="noise",
-        axis_values=[0.1, 0.2, 0.5, 1.0],
-        experiment="basic",
+def run_example():
+    experiment = Experiment(
+        "basic",
+        [Sweep(params={}, axis_name="noise", axis_vals=[0.1, 0.2, 0.5, 1.0], runs=[Run(params={}, evaluator_func=evaluate)])],
     )
+    run(experiment)
 
 
 if __name__ == "__main__":
-    main()
+    run_example()

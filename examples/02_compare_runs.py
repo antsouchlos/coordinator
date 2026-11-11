@@ -1,10 +1,6 @@
-# Several runs with different parameters simulated over the same axis.
-#
-#   python examples/02_compare_runs.py
-
 import random
 
-from coordinator import Run, sweep
+from coordinator import Experiment, Run, Sweep, run
 
 
 def evaluate(point):
@@ -15,18 +11,12 @@ def evaluate(point):
     return {"mean_error": sum(errors) / len(errors)}
 
 
-def main():
-    sweep(
-        [
-            Run("10 samples", evaluate, {"samples": 10}),
-            Run("1000 samples", evaluate, {"samples": 1000}),
-        ],
-        axis="noise",
-        axis_values=[0.1, 0.2, 0.5, 1.0],
-        experiment="compare-runs",
-        shared={"bias": 0.1},
-    )
-
+def run_example():
+    run(Experiment("compare-runs", [Sweep(
+        params={"bias": 0.1}, axis_name="noise", axis_vals=[0.1, 0.2, 0.5, 1.0],
+        runs=[Run(params={"samples": 10}, evaluator_func=evaluate),
+              Run(params={"samples": 1000}, evaluator_func=evaluate)],
+    )]))
 
 if __name__ == "__main__":
-    main()
+    run_example()

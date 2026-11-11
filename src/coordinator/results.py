@@ -1,22 +1,18 @@
 """
 Layout:
 
-    <git toplevel>/results/<experiment>/[<attempt>@]<commit>[-dirty_<patch_hash>]/
+    <git toplevel>/results/<experiment>/[<label>@]<attempt-id>/
         source.patch      # only when the worktree was dirty
-        <label>@<identity_hash>/
+        [<label>@]<sweep-id>/<run-id>/
             data.csv
-            meta.json
+            metadata.json
 
-- Outside a git repository, `./results` is used and the commit is `nogit`.
-- The patch hash covers uncommitted changes to files selected by
-  `.coordinatorinclude`, including untracked files. Git ignored files are
-  excluded. Without include rules, all nonignored files are selected.
+- Outside a git repository, `./results` is used.
 - NEW_ATTEMPT_NAME prefixes newly created revision directories only.
   Existing directories are matched by revision, ignoring the attempt name.
 - If matching runs already exist, datapoints are appended instead of
   recomputed.
-- Run identity covers the axis and effective fixed parameters, regardless of
-  the label. The hash suffix uses 16 hexadecimal characters.
+- Sweep and run IDs are full SHA-256 hashes; labels are cosmetic.
 """
 
 import csv
@@ -26,18 +22,11 @@ import hashlib
 import json
 import math
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pandas as pd
-import pathspec
 
-#
-#
-# Run identification
-#
-#
+from coordinator.git import get_repository_root
 
 
 def _validate_identity_value(value, location: str) -> None:
@@ -60,136 +49,18 @@ def _validate_identity_value(value, location: str) -> None:
     raise TypeError(f"{location} must contain only JSON-compatible values")
 
 
-def _identity_blob(identity: dict) -> str:
+def _serialize_identity(identity: dict) -> str:
     _validate_identity_value(identity, "run identity")
     return json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def _get_identity_hash(identity: dict) -> str:
-    return hashlib.sha256(_identity_blob(identity).encode()).hexdigest()[:16]
-
-
-def _run_git_cmd(*args: str) -> str:
-    try:
-        completed = subprocess.run(
-            ["git", *args], capture_output=True, text=True, check=False
-        )
-    except FileNotFoundError:
-        return ""
-    return completed.stdout.strip()
-
-
-def _git_bytes(*args: str, input_data: bytes | None = None) -> bytes:
-    try:
-        completed = subprocess.run(
-            ["git", *args], input=input_data, capture_output=True, check=False
-        )
-    except FileNotFoundError:
-        return b""
-    return completed.stdout
-
-
-def _nul_paths(data: bytes) -> list[str]:
-    return [os.fsdecode(path) for path in data.split(b"\0") if path]
-
-
-def _get_patch() -> bytes:
-    root = _run_git_cmd("rev-parse", "--show-toplevel")
-    if not root:
-        return b""
-
-    include_path = Path(root) / ".coordinatorinclude"
-    rules = include_path.read_text().splitlines() if include_path.exists() else []
-    has_rules = any(line.strip() and not line.startswith("#") for line in rules)
-    spec = pathspec.GitIgnoreSpec.from_lines(rules) if has_rules else None
-
-    tracked_changes = _nul_paths(
-        _git_bytes("-C", root, "diff", "--name-only", "-z", "HEAD")
-    )
-    untracked = _nul_paths(
-        _git_bytes("-C", root, "ls-files", "--others", "--exclude-standard", "-z")
-    )
-    config_name = ".coordinatorinclude"
-    if (
-        include_path.exists()
-        and config_name not in tracked_changes
-        and config_name not in untracked
-    ):
-        if not _git_bytes("-C", root, "ls-files", "--error-unmatch", "--", config_name):
-            untracked.append(config_name)
-
-    candidates = sorted(set(tracked_changes + untracked) - {config_name})
-    ignored = set()
-    if candidates:
-        ignored = set(
-            _nul_paths(
-                _git_bytes(
-                    "-C",
-                    root,
-                    "check-ignore",
-                    "--no-index",
-                    "-z",
-                    "--stdin",
-                    input_data=b"\0".join(os.fsencode(path) for path in candidates)
-                    + b"\0",
-                )
-            )
-        )
-
-    selected = {
-        path
-        for path in candidates
-        if path not in ignored and (spec is None or spec.match_file(path))
-    }
-    if config_name in tracked_changes or config_name in untracked:
-        selected.add(config_name)
-
-    tracked_selected = sorted(selected.intersection(tracked_changes))
-    untracked_selected = sorted(selected.intersection(untracked))
-    patch = b""
-    if tracked_selected:
-        patch = _git_bytes(
-            "-C",
-            root,
-            "diff",
-            "--no-ext-diff",
-            "--binary",
-            "HEAD",
-            "--",
-            *(f":(literal){path}" for path in tracked_selected),
-        )
-    for path in untracked_selected:
-        patch += _git_bytes(
-            "-C", root, "diff", "--no-index", "--binary", "--", "/dev/null", path
-        )
-    return patch
-
-
-def _revision_and_patch() -> tuple[str, bytes]:
-    commit = _run_git_cmd("rev-parse", "--short=7", "HEAD") or "nogit"
-    patch = _get_patch()
-    if not patch:
-        return commit, patch
-
-    patch_hash = hashlib.sha256(patch).hexdigest()[:6]
-    return f"{commit}-dirty_{patch_hash}", patch
-
-
-def _get_revision() -> str:
-    return _revision_and_patch()[0]
+    return hashlib.sha256(_serialize_identity(identity).encode()).hexdigest()
 
 
 @functools.cache
 def get_results_root() -> Path:
-    toplevel = _run_git_cmd("rev-parse", "--show-toplevel")
-    return (Path(toplevel) if toplevel else Path.cwd()) / "results"
-
-
-#
-#
-# Writing
-#
-#
+    return (get_repository_root() or Path.cwd()) / "results"
 
 
 class RunDir:
@@ -208,7 +79,13 @@ class RunDir:
         matches = pd.Series(True, index=rows.index)
         for key, value in params.items():
             column = rows[key]
-            if pd.api.types.is_float_dtype(column):
+            if value is None:
+                matches &= column.isna()
+            elif (
+                pd.api.types.is_float_dtype(column)
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            ):
                 matches &= (column - float(value)).abs() < 1e-12
             else:
                 matches &= column.astype(str) == str(value)
@@ -230,86 +107,66 @@ class RunDir:
             writer.writerow(row)
 
 
-def resolve_and_open_run(
-    experiment: str,
-    label: str,
-    params: dict,
-    axis: str,
-    shared: dict | None = None,
-    meta: dict | None = None,
-) -> RunDir:
-    if not isinstance(axis, str) or not axis:
-        raise ValueError("axis must be a nonempty string")
-    shared = shared if shared is not None else {}
-    fixed_params = {**shared, **params}
-    fixed_params.pop(axis, None)
-    identity = {"axis": axis, "params": fixed_params}
-    identity_blob = _identity_blob(identity)
-    identity_hash = _get_identity_hash(identity)
-    reserved = {
-        "experiment",
-        "label",
-        "params",
-        "shared",
-        "axis",
-        "identity",
-        "revision",
-        "started",
-        "argv",
-    }
-    if meta and reserved.intersection(meta):
-        names = ", ".join(sorted(reserved.intersection(meta)))
-        raise ValueError(f"meta cannot override reserved fields: {names}")
-
-    experiment_dir = get_results_root() / experiment
-    revision, patch = _revision_and_patch()
-    attempt = os.environ.get("NEW_ATTEMPT_NAME", "")
-    revision_dir = experiment_dir / (f"{attempt}@{revision}" if attempt else revision)
-    for candidate in sorted(experiment_dir.glob("*")):
-        if candidate.is_dir() and candidate.name.split("@")[-1] == revision:
-            revision_dir = candidate
-            break
-
-    matching = sorted(
-        candidate
-        for candidate in revision_dir.glob(f"*@{identity_hash}")
-        if candidate.is_dir()
+def _find_id_directory(parent: Path, identity: str) -> Path | None:
+    matches = (
+        sorted(
+            candidate
+            for candidate in parent.glob("*")
+            if candidate.is_dir() and candidate.name.rsplit("@", 1)[-1] == identity
+        )
+        if parent.exists()
+        else []
     )
-    if len(matching) > 1:
-        raise ValueError(f"Multiple run directories match identity {identity_hash}")
-    if matching:
-        run_dir = matching[0]
+    if len(matches) > 1:
+        raise ValueError(f"Multiple directories match identity {identity}")
+    return matches[0] if matches else None
+
+
+def resolve_and_open_run(experiment, sweep, run, patch: bytes) -> RunDir:
+    attempt_id = experiment._id.value()
+    sweep_id = sweep._id.value()
+    run_id = run._id.value()
+    experiment_dir = get_results_root() / experiment._name
+    attempt_name = os.environ.get("NEW_ATTEMPT_NAME", "")
+    if attempt_name and (
+        attempt_name in {".", ".."}
+        or any(character in attempt_name for character in "/\\@\x00")
+    ):
+        raise ValueError("NEW_ATTEMPT_NAME must be a valid label")
+    attempt_dir = _find_id_directory(experiment_dir, attempt_id)
+    if attempt_dir is None:
+        directory_name = f"{attempt_name}@{attempt_id}" if attempt_name else attempt_id
+        attempt_dir = experiment_dir / directory_name
+    sweep_dir = _find_id_directory(attempt_dir, sweep_id) or attempt_dir / sweep_id
+    run_dir = _find_id_directory(sweep_dir, run_id) or sweep_dir / run_id
+    expected = {
+        "attempt_id": attempt_id,
+        "sweep_id": sweep_id,
+        "run_id": run_id,
+        "axis": sweep._axis_name,
+        "axis_vals": list(sweep._axis_vals),
+        "sweep_params": sweep._params,
+        "run_params": run._params,
+    }
+    metadata_path = run_dir / "metadata.json"
+    if run_dir.exists():
         try:
-            stored_identity = json.loads((run_dir / "meta.json").read_text())[
-                "identity"
-            ]
-            if _identity_blob(stored_identity) != identity_blob:
+            stored = json.loads(metadata_path.read_text())
+            if any(stored.get(key) != value for key, value in expected.items()):
                 raise ValueError("stored identity differs")
-        except (OSError, KeyError, TypeError, ValueError) as exc:
+        except (OSError, ValueError, TypeError) as exc:
             raise ValueError(f"Cannot reuse {run_dir}: invalid run identity") from exc
         return RunDir(run_dir)
 
-    run_dir = revision_dir / f"{label}@{identity_hash}"
-
     run_dir.mkdir(parents=True)
-
-    full_meta = {
-        **(meta or {}),
-        "experiment": experiment,
-        "label": label,
-        "params": params,
-        "shared": shared,
-        "axis": axis,
-        "identity": identity,
-        "revision": revision,
+    metadata = {
+        **expected,
+        "experiment": experiment._name,
+        "revision": attempt_id,
         "started": datetime.datetime.now().isoformat(timespec="seconds"),
-        "argv": sys.argv,
     }
-    with open(run_dir / "meta.json", "w") as handle:
-        json.dump(full_meta, handle, indent=2, sort_keys=True, default=str)
-
-    patch_path = revision_dir / "source.patch"
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True))
+    patch_path = attempt_dir / "source.patch"
     if patch and not patch_path.exists():
         patch_path.write_bytes(patch)
-
     return RunDir(run_dir)

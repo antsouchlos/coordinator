@@ -1,3 +1,3 @@
-from coordinator.api import Run, sweep
+from coordinator.api import Experiment, Run, Sweep, run
 
-__all__ = ["Run", "sweep"]
+__all__ = ["Experiment", "Sweep", "Run", "run"]

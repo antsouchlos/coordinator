@@ -1,64 +1,149 @@
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from pathlib import Path
+from collections.abc import Callable, Sequence
+from copy import deepcopy
+from dataclasses import dataclass
 
-from coordinator.results import resolve_and_open_run
+from coordinator.git import get_revision_and_patch
+from coordinator.results import _get_identity_hash, resolve_and_open_run
 
 
-@dataclass
+@dataclass(frozen=True, init=False)
+class AttemptId:
+    _value: str
+
+    def __init__(self, revision: str) -> None:
+        object.__setattr__(self, "_value", revision)
+
+    def value(self) -> str:
+        return self._value
+
+
+@dataclass(frozen=True, init=False)
+class SweepId:
+    _hash: str
+
+    def __init__(
+        self,
+        experiment_id: AttemptId,
+        axis_name: str,
+        axis_values: Sequence,
+        params: dict,
+    ) -> None:
+        identity = {
+            "experiment_id": experiment_id.value(),
+            "axis_name": axis_name,
+            "axis_values": list(axis_values),
+            "params": dict(params),
+        }
+        object.__setattr__(self, "_hash", _get_identity_hash(identity))
+
+    def value(self) -> str:
+        return self._hash
+
+
+@dataclass(frozen=True, init=False)
+class RunId:
+    _hash: str
+
+    def __init__(self, params: dict, sweep_id: SweepId) -> None:
+        identity = {"params": dict(params), "sweep_id": sweep_id.value()}
+        object.__setattr__(self, "_hash", _get_identity_hash(identity))
+
+    def value(self) -> str:
+        return self._hash
+
+
 class Run:
-    label: str
-    evaluate: Callable[[dict], dict]
-    params: dict = field(default_factory=dict)
+    def __init__(self, params: dict, evaluator_func: Callable[[dict], dict]) -> None:
+        if not isinstance(params, dict):
+            raise TypeError("run params must be a dictionary")
+        if not callable(evaluator_func):
+            raise TypeError("evaluator_func must be callable")
+        self._params = params
+        self._evaluate_func = evaluator_func
+        self._id: RunId | None = None
 
 
-def sweep(
-    runs: list[Run],
-    axis: str,
-    axis_values,
-    experiment: str,
-    shared: dict | None = None,
-    meta: dict | None = None,
-) -> list[Path]:
-    """
-    Evaluate every (run, axis value) point not yet stored in its run directory.
+class Sweep:
+    def __init__(
+        self,
+        params: dict,
+        axis_name: str,
+        axis_vals: Sequence,
+        runs: Sequence[Run],
+    ) -> None:
+        if not isinstance(params, dict):
+            raise TypeError("sweep params must be a dictionary")
+        if not isinstance(axis_name, str) or not axis_name:
+            raise ValueError("axis_name must be a nonempty string")
+        if isinstance(axis_vals, (str, bytes)):
+            raise TypeError("axis_vals must be a sequence of values")
+        if axis_name in params:
+            raise ValueError("axis name overlaps sweep parameters")
+        for run in runs:
+            if not isinstance(run, Run):
+                raise TypeError("runs must contain Run objects")
+            overlapping_names = set(run._params) & (set(params) | {axis_name})
+            if overlapping_names:
+                raise ValueError(
+                    "run parameters overlap sweep parameters or axis: "
+                    f"{sorted(overlapping_names)}"
+                )
 
-    Each run's `evaluate` receives `{**shared, **run.params, axis: value}` and
-    returns the metrics stored alongside it. Axis values form the outer loop
-    and runs the inner one, so an evaluator may cache setup that depends only
-    on `shared` and the axis value. Return result paths in input-run order.
-    Runs with the same axis and effective fixed parameters share one result;
-    the first matching run evaluates missing points.
-    """
+        self._params = params
+        self._axis_name = axis_name
+        self._axis_vals = axis_vals
+        self._runs = deepcopy(runs)
+        self._id: SweepId | None = None
 
-    shared = shared if shared is not None else {}
-    run_dirs = [
-        resolve_and_open_run(
-            experiment,
-            run.label,
-            run.params,
-            axis,
-            shared,
-            meta,
-        )
-        for run in runs
-    ]
 
-    for value in axis_values:
-        processed = set()
-        for run, run_dir in zip(runs, run_dirs):
-            if run_dir.path in processed:
-                continue
-            processed.add(run_dir.path)
-            point = {**shared, **run.params, axis: value}
-            if run_dir.has_row(point):
-                print(f"{run.label}, {axis}: {value}, already done")
-                continue
+class Experiment:
+    def __init__(self, name: str, sweeps: Sequence[Sweep]) -> None:
+        if (
+            not isinstance(name, str)
+            or not name
+            or name in {".", ".."}
+            or any(character in name for character in "/\\\x00")
+        ):
+            raise ValueError("experiment name must be a valid directory name")
+        self._name = name
+        self._sweeps = deepcopy(sweeps)
+        revision, self._patch = get_revision_and_patch()
+        self._id = AttemptId(revision)
 
-            metrics = run.evaluate(point)
-            run_dir.append({**point, **metrics})
+        ids = []
+        for sweep in self._sweeps:
+            if not isinstance(sweep, Sweep):
+                raise TypeError("sweeps must contain Sweep objects")
+            sweep._id = SweepId(
+                self._id,
+                sweep._axis_name,
+                sweep._axis_vals,
+                sweep._params,
+            )
+            ids.append(sweep._id)
+            for run in sweep._runs:
+                run._id = RunId(run._params, sweep._id)
+                ids.append(run._id)
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate sweep or run ID")
 
-            formatted = ", ".join(f"{key}: {metric}" for key, metric in metrics.items())
-            print(f"{run.label}, {axis}: {value}, {formatted}")
 
-    return [run_dir.path for run_dir in run_dirs]
+def run(experiment: Experiment) -> None:
+    if not isinstance(experiment, Experiment):
+        raise TypeError("run expects an Experiment")
+    for sweep in experiment._sweeps:
+        run_directories = [
+            resolve_and_open_run(experiment, sweep, item, experiment._patch)
+            for item in sweep._runs
+        ]
+        for axis_value in sweep._axis_vals:
+            for item, run_directory in zip(sweep._runs, run_directories):
+                point = {**sweep._params, **item._params, sweep._axis_name: axis_value}
+                if run_directory.has_row({sweep._axis_name: axis_value}):
+                    continue
+                metrics = item._evaluate_func(point)
+                if not isinstance(metrics, dict):
+                    raise TypeError("evaluator must return a dictionary")
+                if set(metrics) & set(point):
+                    raise ValueError("evaluator metrics overlap parameter names")
+                run_directory.append({**point, **metrics})

@@ -1,5 +1,3 @@
-"""Index, manage, and compare coordinator result directories."""
-
 import json
 import os
 import shutil
@@ -11,11 +9,11 @@ import pandas as pd
 
 from coordinator.results import get_results_root
 
-_DEPTH = {"experiment": 1, "attempt": 2, "run": 3}
+_DEPTH = {"experiment": 1, "attempt": 2, "sweep": 3, "run": 4}
 
 
-def _managed_path(root: Path | str, kind: str, path: Path | str) -> Path:
-    """Require an existing directory at the expected depth under root."""
+def _resolve_managed_path(root: Path | str, kind: str, path: Path | str) -> Path:
+    """Reject paths outside the results tree or at unexpected depths."""
     if kind not in _DEPTH:
         raise ValueError(f"Unknown result type: {kind}")
     root = Path(root).expanduser().resolve()
@@ -56,8 +54,8 @@ def _write_metadata(path: Path, content: bytes) -> None:
 
 def rename_result(root: Path | str, kind: str, path: Path | str, name: str) -> Path:
     """Rename the editable part of a stored result and matching metadata."""
-    target = _managed_path(root, kind, path)
-    _validate_name(name, allow_empty=kind == "attempt")
+    target = _resolve_managed_path(root, kind, path)
+    _validate_name(name, allow_empty=kind != "experiment")
     if kind == "experiment":
         new_dirname = name
     elif kind == "attempt":
@@ -65,24 +63,24 @@ def rename_result(root: Path | str, kind: str, path: Path | str, name: str) -> P
         new_dirname = f"{name}@{revision}" if name else revision
     else:
         suffix = target.name.rsplit("@", 1)[-1]
-        new_dirname = f"{name}@{suffix}"
+        new_dirname = f"{name}@{suffix}" if name else suffix
     destination = target.with_name(new_dirname)
     if destination == target:
         return target
     if destination.exists():
         raise FileExistsError(f"A result named '{new_dirname}' already exists.")
 
-    field = {"experiment": "experiment", "run": "label"}.get(kind)
+    field = {"experiment": "experiment"}.get(kind)
     changes = []
     if field:
-        for meta_path in target.rglob("meta.json") if kind == "experiment" else [target / "meta.json"]:
+        for meta_path in target.rglob("metadata.json") if kind == "experiment" else [target / "metadata.json"]:
             if meta_path.is_symlink():
                 continue
             original = meta_path.read_bytes()
             try:
                 metadata = json.loads(original)
             except (ValueError, UnicodeDecodeError):
-                continue  # Incomplete runs retain their original invalid metadata.
+                continue
             if not isinstance(metadata, dict):
                 continue
             metadata[field] = name
@@ -92,20 +90,19 @@ def rename_result(root: Path | str, kind: str, path: Path | str, name: str) -> P
     target.rename(destination)
     written = []
     try:
-        for relative, original, updated in changes:
-            _write_metadata(destination / relative, updated)
-            written.append((relative, original))
+        for relative_path, original, updated in changes:
+            _write_metadata(destination / relative_path, updated)
+            written.append((relative_path, original))
     except OSError:
-        for relative, original in reversed(written):
-            _write_metadata(destination / relative, original)
+        for relative_path, original in reversed(written):
+            _write_metadata(destination / relative_path, original)
         destination.rename(target)
         raise
     return destination
 
 
 def delete_result(root: Path | str, kind: str, path: Path | str) -> None:
-    """Permanently remove one result directory and everything within it."""
-    target = _managed_path(root, kind, path)
+    target = _resolve_managed_path(root, kind, path)
     shutil.rmtree(target)
 
 
@@ -120,6 +117,7 @@ class ResultRun:
     axis: str
     params: dict
     shared: dict
+    sweep: str
     metadata: dict
     patch_path: Path | None
 
@@ -129,19 +127,19 @@ class ResultRun:
 
 
 def scan_results(root: Path | str | None = None) -> tuple[list[ResultRun], list[str]]:
-    """Index run metadata without loading CSV data; report invalid runs."""
+    """Read metadata without loading CSV data; report invalid runs."""
     root = Path(root) if root is not None else get_results_root()
     runs = []
     warnings = []
     if not root.is_dir():
         return runs, [f"Results directory does not exist: {root}"]
 
-    for run_dir in sorted(root.glob("*/*/*")):
+    for run_dir in sorted(root.glob("*/*/*/*")):
         if not run_dir.is_dir():
             continue
-        meta_path = run_dir / "meta.json"
+        meta_path = run_dir / "metadata.json"
         if not meta_path.is_file():
-            warnings.append(f"Skipped {run_dir}: missing meta.json")
+            warnings.append(f"Skipped {run_dir}: missing metadata.json")
             continue
         if not (run_dir / "data.csv").is_file():
             warnings.append(f"Skipped {run_dir}: missing data.csv")
@@ -153,29 +151,30 @@ def scan_results(root: Path | str | None = None) -> tuple[list[ResultRun], list[
             axis = metadata["axis"]
             if not isinstance(axis, str) or not axis:
                 raise ValueError("axis must be a nonempty string")
-            params = metadata.get("params", {})
-            shared = metadata.get("shared", {})
+            params = metadata.get("run_params", {})
+            shared = metadata.get("sweep_params", {})
             if not isinstance(params, dict) or not isinstance(shared, dict):
                 raise ValueError("params and shared must be objects")
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            warnings.append(f"Skipped {run_dir}: invalid meta.json ({exc})")
+            warnings.append(f"Skipped {run_dir}: invalid metadata.json ({exc})")
             continue
 
-        revision_dir = run_dir.parent
+        revision_dir = run_dir.parent.parent
         parts = revision_dir.name.split("@", 1)
         attempt = parts[0] if len(parts) == 2 else ""
         patch = revision_dir / "source.patch"
         runs.append(
             ResultRun(
                 path=run_dir,
-                experiment=run_dir.parent.parent.name,
-                label=str(metadata.get("label", run_dir.name.split("@")[0])),
+                experiment=run_dir.parent.parent.parent.name,
+                label=run_dir.name.rsplit("@", 1)[0] if "@" in run_dir.name else run_dir.name[:8],
                 revision=str(metadata.get("revision", parts[-1])),
                 attempt=attempt,
                 started=str(metadata.get("started", "")),
                 axis=axis,
                 params=params,
                 shared=shared,
+                sweep=run_dir.parent.name,
                 metadata=metadata,
                 patch_path=patch if patch.is_file() else None,
             )
@@ -218,7 +217,6 @@ def make_figure(
     logx: bool = False,
     logy: bool = False,
 ):
-    """Build an interactive comparison plot from compatible selected runs."""
     import plotly.graph_objects as go
 
     figure = go.Figure()
@@ -238,7 +236,7 @@ def make_figure(
             x=ordered[axis],
             y=ordered[metric],
             mode="lines+markers",
-            name=f"{run.experiment} / {run.label} / {run.attempt + '@' if run.attempt else ''}{run.revision}",
+            name=f"{run.experiment} / {run.attempt + '@' if run.attempt else ''}{run.revision} / {run.sweep} / {run.label}",
             error_y={"type": "data", "array": ordered[error], "visible": True} if error else None,
         )
     figure.update_layout(

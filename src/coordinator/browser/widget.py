@@ -1,12 +1,8 @@
-"""Small Jupyter frontend for editing names in the results overview."""
-
 import anywidget
 import traitlets
 
 
 class ResultsOverview(anywidget.AnyWidget):
-    """Render overview HTML and relay edits and plot selections to Python."""
-
     html = traitlets.Unicode("").tag(sync=True)
     request = traitlets.Dict(default_value={}).tag(sync=True)
     response = traitlets.Dict(default_value={}).tag(sync=True)
@@ -27,11 +23,13 @@ class ResultsOverview(anywidget.AnyWidget):
         const state = model.get('selection') || {};
         const selected = new Set(state.runs || []);
         const attempts = state.attempts || {};
+        const sweeps = state.sweeps || {};
         el.querySelectorAll('.coordinator-select').forEach((input) => {
           if (input.dataset.selectKind === 'run') {
             input.checked = selected.has(input.dataset.selectPath);
           } else {
-            const status = attempts[input.dataset.selectPath] || 'none';
+            const groups = input.dataset.selectKind === 'sweep' ? sweeps : attempts;
+            const status = groups[input.dataset.selectPath] || 'none';
             input.checked = status === 'all';
             input.indeterminate = status === 'some';
           }
