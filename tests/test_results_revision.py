@@ -61,27 +61,27 @@ def test_ids_depend_on_full_axis_list_and_parameters(repo):
     other_values = make_experiment(axis_vals=(1, 2, 3))
     other_sweep = make_experiment(sweep_params={"bias": 2})
     other_run = make_experiment(run_params={"power": 3})
-    assert base._id.value() == run_git(repo, "rev-parse", "--short=7", "HEAD")
+    assert base.id.value() == run_git(repo, "rev-parse", "--short=7", "HEAD")
     assert (
-        len(base._sweeps[0]._id.value())
-        == len(base._sweeps[0]._runs[0]._id.value())
+        len(base.sweeps[0].id.value())
+        == len(base.sweeps[0].runs[0].id.value())
         == 64
     )
-    assert other_values._sweeps[0]._id.value() != base._sweeps[0]._id.value()
+    assert other_values.sweeps[0].id.value() != base.sweeps[0].id.value()
     assert (
-        other_values._sweeps[0]._runs[0]._id.value()
-        != base._sweeps[0]._runs[0]._id.value()
+        other_values.sweeps[0].runs[0].id.value()
+        != base.sweeps[0].runs[0].id.value()
     )
-    assert other_sweep._sweeps[0]._id.value() != base._sweeps[0]._id.value()
-    assert other_run._sweeps[0]._id.value() == base._sweeps[0]._id.value()
+    assert other_sweep.sweeps[0].id.value() != base.sweeps[0].id.value()
+    assert other_run.sweeps[0].id.value() == base.sweeps[0].id.value()
     assert (
-        other_run._sweeps[0]._runs[0]._id.value()
-        != base._sweeps[0]._runs[0]._id.value()
+        other_run.sweeps[0].runs[0].id.value()
+        != base.sweeps[0].runs[0].id.value()
     )
 
-    sweep = base._sweeps[0]
+    sweep = base.sweeps[0]
     sweep_payload = {
-        "experiment_id": base._id.value(),
+        "experiment_id": base.id.value(),
         "axis_name": "size",
         "axis_values": [1, 2],
         "params": {"bias": 1},
@@ -93,11 +93,11 @@ def test_ids_depend_on_full_axis_list_and_parameters(repo):
     expected_run_id = hashlib.sha256(
         json.dumps(run_payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    assert isinstance(base._id, AttemptId)
-    assert isinstance(sweep._id, SweepId)
-    assert isinstance(sweep._runs[0]._id, RunId)
-    assert sweep._id.value() == expected_sweep_id
-    assert sweep._runs[0]._id.value() == expected_run_id
+    assert isinstance(base.id, AttemptId)
+    assert isinstance(sweep.id, SweepId)
+    assert isinstance(sweep.runs[0].id, RunId)
+    assert sweep.id.value() == expected_sweep_id
+    assert sweep.runs[0].id.value() == expected_run_id
 
 
 def test_duplicate_ids_and_parameter_overlap_rejected(repo):
@@ -138,14 +138,14 @@ def test_constructors_retain_inputs_and_copy_runs(repo):
     sweep = Sweep(sweep_params, "size", axis_vals, [original_run])
     experiment = Experiment("example", [sweep])
 
-    assert original_run._params is run_params
-    assert sweep._params is sweep_params
-    assert sweep._axis_vals is axis_vals
-    assert sweep._runs[0] is not original_run
-    assert sweep._runs[0]._params is not run_params
-    assert original_run._id is None
-    assert experiment._sweeps[0] is not sweep
-    assert experiment._id.value() == run_git(repo, "rev-parse", "--short=7", "HEAD")
+    assert original_run.params is run_params
+    assert sweep.params is sweep_params
+    assert sweep.axis_vals is axis_vals
+    assert sweep.runs[0] is not original_run
+    assert sweep.runs[0].params is not run_params
+    assert original_run.id is None
+    assert experiment.sweeps[0] is not sweep
+    assert experiment.id.value() == run_git(repo, "rev-parse", "--short=7", "HEAD")
 
 
 def test_layout_execution_order_resume_and_cosmetic_rename(repo, monkeypatch):
@@ -165,10 +165,10 @@ def test_layout_execution_order_resume_and_cosmetic_rename(repo, monkeypatch):
     experiment = Experiment("example", [sweep])
     assert run(experiment) is None
     assert calls == [(1, 2, 1), (1, 3, 1), (2, 2, 1), (2, 3, 1)]
-    attempt = get_results_root() / "example" / f"first@{experiment._id.value()}"
-    owned_sweep = experiment._sweeps[0]
-    sweep_path = attempt / owned_sweep._id.value()
-    first = sweep_path / owned_sweep._runs[0]._id.value()
+    attempt = get_results_root() / "example" / f"first@{experiment.id.value()}"
+    owned_sweep = experiment.sweeps[0]
+    sweep_path = attempt / owned_sweep.id.value()
+    first = sweep_path / owned_sweep.runs[0].id.value()
     assert first.is_dir()
     assert list(pd.read_csv(first / "data.csv")["size"]) == [1, 2]
     metadata = json.loads((first / "metadata.json").read_text())
@@ -192,26 +192,26 @@ def test_layout_execution_order_resume_and_cosmetic_rename(repo, monkeypatch):
 def test_attempt_changes_with_git_commit_and_selected_patch(repo):
     first = make_experiment()
     run(first)
-    first_attempt = first._id.value()
+    first_attempt = first.id.value()
     (repo / "skip.txt").write_text("excluded change\n")
-    assert make_experiment()._id.value() == first_attempt
+    assert make_experiment().id.value() == first_attempt
     (repo / "keep.txt").write_text("selected change\n")
     run(first)
-    assert first._id.value() == first_attempt
+    assert first.id.value() == first_attempt
     assert [path.name for path in (get_results_root() / "example").iterdir()] == [
         first_attempt
     ]
     second = make_experiment()
     run(second)
-    assert second._id.value() != first_attempt and "-dirty_" in second._id.value()
-    patch = get_results_root() / "example" / second._id.value() / "source.patch"
+    assert second.id.value() != first_attempt and "-dirty_" in second.id.value()
+    patch = get_results_root() / "example" / second.id.value() / "source.patch"
     assert "keep.txt" in patch.read_text()
     assert "skip.txt" not in patch.read_text()
     run_git(repo, "add", "keep.txt")
     run_git(repo, "commit", "-qm", "New code")
     third = make_experiment()
     run(third)
-    assert third._id.value() not in {first_attempt, second._id.value()}
+    assert third.id.value() not in {first_attempt, second.id.value()}
 
 
 def test_axis_list_change_creates_new_run(repo):
@@ -220,10 +220,10 @@ def test_axis_list_change_creates_new_run(repo):
     second = make_experiment((1, 2, 3))
     run(second)
     assert (
-        first._sweeps[0]._runs[0]._id.value() != second._sweeps[0]._runs[0]._id.value()
+        first.sweeps[0].runs[0].id.value() != second.sweeps[0].runs[0].id.value()
     )
     assert (
-        len(list((get_results_root() / "example" / first._id.value()).iterdir())) == 2
+        len(list((get_results_root() / "example" / first.id.value()).iterdir())) == 2
     )
 
 
