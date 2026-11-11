@@ -14,11 +14,13 @@ class ResultsOverview(anywidget.AnyWidget):
       el.classList.add('coordinator-root');
       let active = null;
       let serial = 0;
+
       const draw = () => {
         active = null;
         el.innerHTML = model.get('html');
         syncSelection();
       };
+
       const syncSelection = () => {
         const state = model.get('selection') || {};
         const selected = new Set(state.runs || []);
@@ -35,12 +37,14 @@ class ResultsOverview(anywidget.AnyWidget):
           }
         });
       };
+
       const cancel = () => {
         if (!active) return;
         active.input.replaceWith(active.title);
         active.error.remove();
         active = null;
       };
+
       const submit = () => {
         if (!active || active.pending) return;
         const edit = active;
@@ -55,6 +59,7 @@ class ResultsOverview(anywidget.AnyWidget):
         model.set('request', {id, action: 'rename', target: edit.target, name: edit.input.value});
         model.save_changes();
       };
+
       el.addEventListener('click', (event) => {
         if (event.target.matches('.coordinator-select')) {
           event.stopPropagation();
@@ -100,6 +105,7 @@ class ResultsOverview(anywidget.AnyWidget):
         model.set('request', {id, action: 'delete', target: button.dataset.resultId});
         model.save_changes();
       });
+
       el.addEventListener('change', (event) => {
         const input = event.target;
         if (!input.matches('.coordinator-select')) return;
@@ -110,6 +116,7 @@ class ResultsOverview(anywidget.AnyWidget):
         });
         model.save_changes();
       });
+
       el.addEventListener('toggle', (event) => {
         const panel = event.target;
         if (!panel.matches('details[data-panel-kind]')) return;
@@ -124,9 +131,11 @@ class ResultsOverview(anywidget.AnyWidget):
         });
         model.save_changes();
       }, true);
+
       el.addEventListener('pointerdown', (event) => {
         if (event.target.closest('.coordinator-delete') && active) cancel();
       });
+
       el.addEventListener('keydown', (event) => {
         if (event.target.matches('.coordinator-editable') &&
             (event.key === 'Enter' || event.key === ' ')) {
@@ -134,6 +143,7 @@ class ResultsOverview(anywidget.AnyWidget):
           event.target.click();
         }
       });
+
       model.on('change:response', () => {
         const response = model.get('response');
         if (response.ok) return;
@@ -149,12 +159,15 @@ class ResultsOverview(anywidget.AnyWidget):
         if (button) button.title = response.error;
         window.alert(response.error);
       });
+
       model.on('change:html', draw);
       model.on('change:selection', syncSelection);
       draw();
+
       let observer = null;
       let disposed = false;
       let attempts = 0;
+
       const connectPlotSize = () => {
         if (disposed) return;
         const dashboard = el.closest('.coordinator-dashboard');
@@ -175,6 +188,7 @@ class ResultsOverview(anywidget.AnyWidget):
         observer.observe(plotArea);
         measure();
       };
+
       requestAnimationFrame(connectPlotSize);
       return () => { disposed = true; observer?.disconnect(); };
     }

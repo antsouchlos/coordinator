@@ -19,11 +19,23 @@ def evaluate(point):
 
 
 def run_example():
-    run(Experiment("expensive-setup", [Sweep(
-        params={"count": 10000}, axis_name="noise", axis_vals=[0.1, 0.2, 0.5, 1.0],
-        runs=[Run(params={"power": 1}, evaluator_func=evaluate),
-              Run(params={"power": 2}, evaluator_func=evaluate)],
-    )]))
+    run(
+        Experiment(
+            "expensive-setup",
+            [
+                Sweep(
+                    params={"count": 10000},
+                    axis_name="noise",
+                    axis_vals=[0.1, 0.2, 0.5, 1.0],
+                    runs=[
+                        Run(params={"power": 1}, evaluator_func=evaluate),
+                        Run(params={"power": 2}, evaluator_func=evaluate),
+                    ],
+                )
+            ],
+        )
+    )
+
 
 if __name__ == "__main__":
     run_example()

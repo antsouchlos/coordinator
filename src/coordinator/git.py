@@ -19,6 +19,7 @@ def _run_git_command(*args: str) -> str:
         )
     except FileNotFoundError:
         return ""
+
     return completed.stdout.strip()
 
 
@@ -29,6 +30,7 @@ def _read_git_bytes(*args: str, input_data: bytes | None = None) -> bytes:
         )
     except FileNotFoundError:
         return b""
+
     return completed.stdout
 
 
@@ -43,6 +45,7 @@ def get_repository_root() -> Path | None:
 
 def _get_patch() -> bytes:
     root = get_repository_root()
+
     if root is None:
         return b""
 
@@ -58,16 +61,20 @@ def _get_patch() -> bytes:
         _read_git_bytes("-C", root, "ls-files", "--others", "--exclude-standard", "-z")
     )
     config_name = ".coordinatorinclude"
+
     if (
         include_path.exists()
         and config_name not in tracked_changes
         and config_name not in untracked
     ):
-        if not _read_git_bytes("-C", root, "ls-files", "--error-unmatch", "--", config_name):
+        if not _read_git_bytes(
+            "-C", root, "ls-files", "--error-unmatch", "--", config_name
+        ):
             untracked.append(config_name)
 
     candidates = sorted(set(tracked_changes + untracked) - {config_name})
     ignored = set()
+
     if candidates:
         ignored = set(
             _decode_nul_paths(
@@ -89,12 +96,14 @@ def _get_patch() -> bytes:
         for path in candidates
         if path not in ignored and (spec is None or spec.match_file(path))
     }
+
     if config_name in tracked_changes or config_name in untracked:
         selected.add(config_name)
 
     tracked_selected = sorted(selected.intersection(tracked_changes))
     untracked_selected = sorted(selected.intersection(untracked))
     patch = b""
+
     if tracked_selected:
         patch = _read_git_bytes(
             "-C",
@@ -106,19 +115,21 @@ def _get_patch() -> bytes:
             "--",
             *(f":(literal){path}" for path in tracked_selected),
         )
+
     for path in untracked_selected:
         patch += _read_git_bytes(
             "-C", root, "diff", "--no-index", "--binary", "--", "/dev/null", path
         )
+
     return patch
 
 
 def get_revision_and_patch() -> tuple[str, bytes]:
     commit = _run_git_command("rev-parse", "--short=7", "HEAD") or "nogit"
     patch = _get_patch()
+
     if not patch:
         return commit, patch
 
     patch_hash = hashlib.sha256(patch).hexdigest()[:6]
     return f"{commit}-dirty_{patch_hash}", patch
-

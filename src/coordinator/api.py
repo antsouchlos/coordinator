@@ -58,6 +58,7 @@ class Run:
             raise TypeError("run params must be a dictionary")
         if not callable(evaluator_func):
             raise TypeError("evaluator_func must be callable")
+
         self._params = params
         self._evaluate_func = evaluator_func
         self._id: RunId | None = None
@@ -79,10 +80,13 @@ class Sweep:
             raise TypeError("axis_vals must be a sequence of values")
         if axis_name in params:
             raise ValueError("axis name overlaps sweep parameters")
+
         for run in runs:
             if not isinstance(run, Run):
                 raise TypeError("runs must contain Run objects")
+
             overlapping_names = set(run._params) & (set(params) | {axis_name})
+
             if overlapping_names:
                 raise ValueError(
                     "run parameters overlap sweep parameters or axis: "
@@ -105,15 +109,18 @@ class Experiment:
             or any(character in name for character in "/\\\x00")
         ):
             raise ValueError("experiment name must be a valid directory name")
+
         self._name = name
         self._sweeps = deepcopy(sweeps)
         revision, self._patch = get_revision_and_patch()
         self._id = AttemptId(revision)
 
         ids = []
+
         for sweep in self._sweeps:
             if not isinstance(sweep, Sweep):
                 raise TypeError("sweeps must contain Sweep objects")
+
             sweep._id = SweepId(
                 self._id,
                 sweep._axis_name,
@@ -121,9 +128,11 @@ class Experiment:
                 sweep._params,
             )
             ids.append(sweep._id)
+
             for run in sweep._runs:
                 run._id = RunId(run._params, sweep._id)
                 ids.append(run._id)
+
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate sweep or run ID")
 
@@ -131,19 +140,25 @@ class Experiment:
 def run(experiment: Experiment) -> None:
     if not isinstance(experiment, Experiment):
         raise TypeError("run expects an Experiment")
+
     for sweep in experiment._sweeps:
         run_directories = [
             resolve_and_open_run(experiment, sweep, item, experiment._patch)
             for item in sweep._runs
         ]
+
         for axis_value in sweep._axis_vals:
             for item, run_directory in zip(sweep._runs, run_directories):
                 point = {**sweep._params, **item._params, sweep._axis_name: axis_value}
+
                 if run_directory.has_row({sweep._axis_name: axis_value}):
                     continue
+
                 metrics = item._evaluate_func(point)
+
                 if not isinstance(metrics, dict):
                     raise TypeError("evaluator must return a dictionary")
                 if set(metrics) & set(point):
                     raise ValueError("evaluator metrics overlap parameter names")
+
                 run_directory.append({**point, **metrics})
