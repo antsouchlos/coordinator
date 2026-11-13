@@ -78,7 +78,7 @@ class ResultsOverview(anywidget.AnyWidget):
           input.type = 'text';
           input.className = 'coordinator-name-input';
           input.value = title.dataset.editName;
-          input.setAttribute('aria-label', `Rename ${title.dataset.kind}`);
+          input.setAttribute('aria-label', title.getAttribute('aria-label'));
           input.style.width = `${Math.max(100, title.getBoundingClientRect().width + 30)}px`;
           const error = document.createElement('span');
           error.className = 'coordinator-edit-error';

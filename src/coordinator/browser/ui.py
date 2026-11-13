@@ -43,6 +43,11 @@ def _pluralize(word, count):
     return word if count == 1 else f"{word}s"
 
 
+def _split_label_and_id(dirname):
+    label, separator, identity = dirname.rpartition("@")
+    return (label, identity) if separator else ("", dirname)
+
+
 def _render_panel_chevron():
     return (
         "<svg class='coordinator-panel-chevron' aria-hidden='true' "
@@ -92,13 +97,14 @@ def _render_runs_table(group, render_controls, selected, render_panel_attributes
 
     for run in group:
         metadata = json.dumps(run.metadata, indent=2, sort_keys=True, default=str)
+        label, identity = _split_label_and_id(run.path.name)
         values = [
             "<span class='coordinator-select-label'>"
             f"<input class='coordinator-select' type='checkbox' data-select-kind='run' "
             f"data-select-path='{_escape_html(run.path)}' aria-label='Plot run {_escape_html(run.label)}'"
             + (" checked" if run.path in selected else "")
             + ">"
-            f"<b>{render_controls('run', run.path, run.label)}</b>"
+            f"<b>{render_controls('run', run.path, label, suffix=('@' if label else ' · ') + _escape_html(identity), delete_name=run.path.name)}</b>"
             "</span>"
             "<div style='display:flex;gap:12px;margin-top:3px'>"
             f"<details class='coordinator-view-data' {render_panel_attributes('data', run.path)}>"
@@ -413,16 +419,16 @@ def launch_results_browser(
         ):
             plot_area.children[1].layout.width = change["new"]
 
-    def render_controls(
-        kind, path, name, *, suffix="", placeholder=None, delete_name=None
-    ):
+    def render_controls(kind, path, name, *, suffix="", delete_name=None):
         key = str(len(targets))
         targets[key] = (kind, path)
-        shown = name if name else placeholder or "Add name"
+        shown = name if name else "Add label"
         delete_name = shown if delete_name is None else delete_name
+        edit_action = "Rename" if kind == "experiment" else "Edit"
+        edit_subject = kind if kind == "experiment" else f"{kind} label"
         return (
             f"<span class='coordinator-editable' tabindex='0' role='button' "
-            f"aria-label='Rename {kind}' data-result-id='{key}' "
+            f"aria-label='{edit_action} {edit_subject}' data-result-id='{key}' "
             f"data-kind='{kind}' data-edit-name='{_escape_html(name)}'>"
             f"{_escape_html(shown)}</span>"
             f"{suffix}"
@@ -448,10 +454,7 @@ def launch_results_browser(
 
     def render_sweep_card(name, group):
         path = group[0].path.parent
-        label, separator, identity = name.rpartition("@")
-
-        if not separator:
-            label, identity = "", name
+        label, identity = _split_label_and_id(name)
 
         heading = (
             "<span style='color:#667'>Sweep: </span>"
@@ -480,10 +483,7 @@ def launch_results_browser(
             date_text = f"{dates[0]} – {dates[-1]}"
 
         patch_path = group[0].patch_path
-        attempt_name, separator, revision = name.partition("@")
-
-        if not separator:
-            attempt_name, revision = "", name
+        attempt_name, revision = _split_label_and_id(name)
 
         heading = (
             "<div style='min-width:0;overflow-wrap:anywhere'>"

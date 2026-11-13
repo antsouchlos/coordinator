@@ -1,4 +1,5 @@
 import json
+import re
 
 import pandas as pd
 import pytest
@@ -122,6 +123,29 @@ def test_plot_new_format(tmp_path):
         load_selected(scan_results(tmp_path)[0])
 
 
+def test_plot_uses_labels_without_ids(tmp_path):
+    write_run(
+        tmp_path,
+        attempt="try@aaa1111",
+        sweep="comparison@bbb2222",
+        name="curve@ccc3333",
+    )
+    write_run(
+        tmp_path,
+        attempt="ddd4444",
+        sweep="eee5555",
+        name="fff6666",
+    )
+    axis, loaded, _metrics = load_selected(scan_results(tmp_path)[0])
+
+    figure = make_figure(axis, loaded, "score")
+
+    assert {trace.name for trace in figure.data} == {
+        "exp / try / comparison / curve",
+        "exp / ddd4444 / eee5555 / fff6666",
+    }
+
+
 def test_sweep_rename_delete_and_settings_paths(tmp_path):
     run = write_run(tmp_path)
     root = tmp_path
@@ -192,3 +216,122 @@ def test_ui_sweep_group_and_selection(tmp_path):
     assert json.loads((tmp_path / "settings.json").read_text())["panels"]["sweep"] == {
         run.parent.relative_to(tmp_path).as_posix(): False
     }
+
+
+@pytest.mark.parametrize("kind", ["attempt", "sweep", "run"])
+def test_ui_result_label_keeps_id_and_settings(tmp_path, kind):
+    pytest.importorskip("ipywidgets")
+    pytest.importorskip("anywidget")
+    from coordinator.browser.ui import launch_results_browser
+
+    run_path = write_run(
+        tmp_path, attempt="aaa1111", sweep="bbb2222", name="ccc3333"
+    )
+    settings_path = tmp_path / "settings.json"
+    dashboard = launch_results_browser(tmp_path, settings_path=settings_path)
+    overview = dashboard.children[5]
+    path = {"attempt": run_path.parent.parent, "sweep": run_path.parent, "run": run_path}[kind]
+    identity = path.name
+
+    def get_edit_target():
+        match = re.search(
+            rf"<span class='coordinator-editable'[^>]*data-result-id='(\d+)' data-kind='{kind}' data-edit-name='([^']*)'>([^<]*)</span>([^<]*)",
+            overview.html,
+        )
+        assert match is not None
+        return match
+
+    initial = get_edit_target()
+    assert initial.group(2) == ""
+    assert initial.group(3) == "Add label"
+    assert initial.group(4) == f" · {identity}"
+    assert f"aria-label='Edit {kind} label'" in overview.html
+
+    overview.request = {
+        "id": 1,
+        "action": "select",
+        "kind": "run",
+        "path": str(run_path),
+        "checked": True,
+    }
+    overview.request = {
+        "id": 2,
+        "action": "panel",
+        "kind": "data",
+        "path": run_path.relative_to(tmp_path).as_posix(),
+        "open": True,
+    }
+    overview.request = {
+        "id": 3,
+        "action": "rename",
+        "target": initial.group(1),
+        "name": "new",
+    }
+    assert overview.response["ok"] is True
+
+    renamed_path = path.with_name(f"new@{identity}")
+    renamed_run = renamed_path / run_path.relative_to(path) if kind != "run" else renamed_path
+    assert renamed_run.is_dir()
+    assert not path.exists()
+    assert overview.selection["runs"] == [str(renamed_run)]
+    settings = json.loads(settings_path.read_text())
+    relative_run = renamed_run.relative_to(tmp_path).as_posix()
+    assert settings["selected_runs"] == [relative_run]
+    assert settings["panels"]["data"] == {relative_run: True}
+    metadata = json.loads((renamed_run / "metadata.json").read_text())
+    assert metadata["attempt_id"] == "aaa1111"
+    assert metadata["sweep_id"] == "bbb2222"
+    assert metadata["run_id"] == "ccc3333"
+
+    labeled = get_edit_target()
+    assert labeled.group(2) == labeled.group(3) == "new"
+    assert labeled.group(4) == f"@{identity}"
+    overview.request = {
+        "id": 4,
+        "action": "rename",
+        "target": labeled.group(1),
+        "name": "changed",
+    }
+    assert overview.response["ok"] is True
+    changed_path = path.with_name(f"changed@{identity}")
+    assert changed_path.is_dir()
+    assert get_edit_target().group(2) == "changed"
+
+    overview.request = {
+        "id": 5,
+        "action": "rename",
+        "target": get_edit_target().group(1),
+        "name": "",
+    }
+    assert overview.response["ok"] is True
+    assert run_path.is_dir()
+    assert overview.selection["runs"] == [str(run_path)]
+    assert get_edit_target().group(4) == f" · {identity}"
+    settings = json.loads(settings_path.read_text())
+    assert settings["selected_runs"] == [run_path.relative_to(tmp_path).as_posix()]
+    assert settings["panels"]["data"] == {
+        run_path.relative_to(tmp_path).as_posix(): True
+    }
+
+
+def test_ui_labeled_results_show_fixed_ids(tmp_path):
+    pytest.importorskip("ipywidgets")
+    pytest.importorskip("anywidget")
+    from coordinator.browser.ui import launch_results_browser
+
+    write_run(
+        tmp_path,
+        attempt="try@aaa1111",
+        sweep="comparison@bbb2222",
+        name="curve@ccc3333",
+    )
+    overview = launch_results_browser(
+        tmp_path, settings_path=tmp_path / "settings.json"
+    ).children[5]
+
+    for label, identity in (
+        ("try", "aaa1111"),
+        ("comparison", "bbb2222"),
+        ("curve", "ccc3333"),
+    ):
+        assert f"data-edit-name='{label}'>{label}</span>@{identity}" in overview.html

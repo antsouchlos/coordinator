@@ -263,6 +263,11 @@ def load_selected(
     return axis, loaded, sorted(metrics or [])
 
 
+def _get_plot_name(path: Path) -> str:
+    label, separator, _identity = path.name.rpartition("@")
+    return label if separator else path.name
+
+
 def make_figure(
     axis: str,
     loaded: list[tuple[ResultRun, pd.DataFrame]],
@@ -292,11 +297,19 @@ def make_figure(
             raise ValueError(f"{run.path}: log y requires positive metric values.")
 
         ordered = frame.sort_values(axis)
+        plot_name = " / ".join(
+            (
+                run.experiment,
+                _get_plot_name(run.path.parent.parent),
+                _get_plot_name(run.path.parent),
+                _get_plot_name(run.path),
+            )
+        )
         figure.add_scatter(
             x=ordered[axis],
             y=ordered[metric],
             mode="lines+markers",
-            name=f"{run.experiment} / {run.attempt + '@' if run.attempt else ''}{run.revision} / {run.sweep} / {run.label}",
+            name=plot_name,
             error_y={"type": "data", "array": ordered[error], "visible": True}
             if error
             else None,
