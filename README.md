@@ -1,8 +1,9 @@
 # Coordinator
 
-A simulation managemenet framework.
-`coordinator` structures simulations based on `experiments`, `attempts`,
-`sweeps` and `runs`. For example:
+`coordinator` is a thin simulation managemenet framework that aims to simplify
+the organisation and visualization of results.
+Simulations are structured based on `experiments`, `attempts`, `sweeps`, and
+`runs`. For example:
 
 ```text
 Experiment: Estimation of the expected value
@@ -30,41 +31,74 @@ Experiment: Estimation of the expected value
   algorithm being simulated. An attempt may include multiple sweeps.
 - An `experiment` groups several attempts.
 
+New attempts are created automatically when code changes are detected.
+Both different git commit hashes and different dirty repo states are counted
+as code changes.
+See [storing simulation results](storing-simulation-results) below
+for more details.
+A file named `.coordinatorinclude` can be used to speficy which files count
+toward code changes, with `.gitignore` syntax.
+If the file doesn't exist, `coordinator` defaults to the files considered by
+git, i.e., the files that are not `.gitignore`d.
+
 New datapoints are appended to existing results and the resimulation of points
 that already exist is skipped.
-IDs are assigned when an `Experiment` is constructed. Construct a new
-`Experiment` after changing its parameters, axis values, or Git revision.
 
 ## Usage
 
 ```py
-from coordinator import Run, Sweep, Experiment, run
+import numpy as np
+from coordinator import Experiment, Run, Sweep, run
 
 
-def evaluator_func(params):
-    pass
+def evaluate_arithmetic_mean(params) -> dict:
+    errors = []
+
+    for _ in range(10000):
+        mean = params["mean"]
+
+        if params["noise"] == "gaussian":
+            samples = mean + np.random.normal(scale=params["sigma"], size=100)
+        elif params["noise"] == "laplace":
+            samples = mean + np.random.laplace(scale=params["sigma"], size=100)
+        else:
+            raise RuntimeError("Unknown noise type")
+
+        mean_estimate = np.mean(samples)
+        errors.append(mean - mean_estimate)
+
+    mean_square_error = np.mean(np.array(errors) ** 2)
+    return {"MSE": mean_square_error}
 
 
 experiment = Experiment(
-    "some_experiment",
+    "estimate_expected_value",
     [
         Sweep(
-            params={"b": 3},
-            axis_name="c",
-            axis_vals=[1, 2, 3],
+            params={"mean": 5},
+            axis_name="sigma",
+            axis_vals=[0.5, 1, 2, 3],
             runs=[
-                Run(params={"a": 1}, evaluator_func=evaluator_func),
-                Run(params={"a": 2}, evaluator_func=evaluator_func),
-                Run(params={"a": 3}, evaluator_func=evaluator_func),
+                Run({"noise": "gaussian"}, evaluate_arithmetic_mean),
+                Run({"noise": "laplace"}, evaluate_arithmetic_mean),
             ],
-        )
+        ),
+        Sweep(
+            params={"sigma": 1},
+            axis_name="mean",
+            axis_vals=[-2, -1, 1, 2],
+            runs=[
+                Run({"noise": "gaussian"}, evaluate_arithmetic_mean),
+                Run({"noise": "laplace"}, evaluate_arithmetic_mean),
+            ],
+        ),
     ],
 )
 
 run(experiment)
 ```
 
-More extensive examples can be found in the `examples/` directory.
+More examples can be found in the `examples/` directory.
 
 ## Browse results in JupyterLab
 
@@ -102,8 +136,7 @@ Run params -------------> |     Run ID      |
 ```
 
 The results are stored according to the scheme below.
-Attempts can be labeled with `NEW_ATTEMPT_NAME`; sweep and run labels can be
-changed in the results browser. Labels use a `<label>@` directory prefix.
+Attempts, sweeps and runs can have an optional label.
 Note, however, that the labels are purely cosmetic and don't influence the ID
 or resimulation behavior.
 

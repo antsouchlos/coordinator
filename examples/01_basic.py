@@ -1,11 +1,10 @@
-import random
-
+import numpy as np
 from coordinator import Experiment, Run, Sweep, run
 
 
-def evaluate(point):
-    errors = [abs(random.gauss(0, point["noise"])) for _ in range(1000)]
-    return {"mean_error": sum(errors) / len(errors)}
+def evaluate(params):
+    errors = np.random.normal(scale=params["sigma"], size=10000)
+    return {"MSE": np.mean(errors**2)}
 
 
 def main():
@@ -14,7 +13,7 @@ def main():
         [
             Sweep(
                 params={},
-                axis_name="noise",
+                axis_name="sigma",
                 axis_vals=[0.1, 0.2, 0.5, 1.0],
                 runs=[Run(params={}, evaluator_func=evaluate)],
             )

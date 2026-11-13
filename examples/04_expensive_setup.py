@@ -12,9 +12,9 @@ def make_samples(noise, count):
     return [random.gauss(0, noise) for _ in range(count)]
 
 
-def evaluate(point):
-    samples = make_samples(point["noise"], point["count"])
-    errors = [abs(sample) ** point["power"] for sample in samples]
+def evaluate(params):
+    samples = make_samples(params["noise"], params["count"])
+    errors = [abs(sample) ** params["power"] for sample in samples]
     return {"mean_error": sum(errors) / len(errors)}
 
 
