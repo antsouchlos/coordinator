@@ -44,6 +44,13 @@ git, i.e., the files that are not `.gitignore`d.
 New datapoints are appended to existing results and the resimulation of points
 that already exist is skipped.
 
+## Browse results in JupyterLab
+
+Copy `notebooks/results_browser.ipynb` into your project and run it.
+
+![image](doc/plot-screenshot.png)
+![image](doc/list-screenshot.png)
+
 ## Usage
 
 ```py
@@ -99,10 +106,6 @@ run(experiment)
 ```
 
 More examples can be found in the `examples/` directory.
-
-## Browse results in JupyterLab
-
-Copy `notebooks/results_browser.ipynb` into your project and run it to inspect and plot runs.
 
 ## Storing Simulation Results
 
