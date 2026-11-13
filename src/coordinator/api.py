@@ -1,9 +1,50 @@
+import datetime
+import hashlib
+import json
+import math
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 
 from coordinator.git import get_revision_and_patch
-from coordinator.results import _get_identity_hash, resolve_and_open_run
+from coordinator.results import get_run_file_handler, write_source_patch_if_not_exists
+
+
+def _validate_identity_value(value, location: str) -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{location} must be a finite JSON value")
+
+        return
+
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_identity_value(item, f"{location}[{index}]")
+
+        return
+
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"{location} keys must be strings")
+
+            _validate_identity_value(item, f"{location}.{key}")
+
+        return
+
+    raise TypeError(f"{location} must contain only JSON-compatible values")
+
+
+def _serialize_identity(identity: dict) -> str:
+    _validate_identity_value(identity, "run identity")
+    return json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _get_identity_hash(identity: dict) -> str:
+    return hashlib.sha256(_serialize_identity(identity).encode()).hexdigest()
 
 
 @dataclass(frozen=True, init=False)
@@ -113,7 +154,7 @@ class Experiment:
         self.name = name
         self.sweeps = deepcopy(sweeps)
         revision, self.patch = get_revision_and_patch()
-        self.id = AttemptId(revision)
+        self.attempt_id = AttemptId(revision)
 
         ids = []
 
@@ -122,7 +163,7 @@ class Experiment:
                 raise TypeError("sweeps must contain Sweep objects")
 
             sweep.id = SweepId(
-                self.id,
+                self.attempt_id,
                 sweep.axis_name,
                 sweep.axis_vals,
                 sweep.params,
@@ -137,28 +178,75 @@ class Experiment:
             raise ValueError("duplicate sweep or run ID")
 
 
+def _append_metadata(
+    current_metadata: dict,
+    start_datetime: datetime.datetime,
+    end_datetime: datetime.datetime,
+    sweep_params: dict,
+    axis_name: str,
+) -> dict:
+    if "sweep_params" not in current_metadata:
+        current_metadata["sweep_params"] = sweep_params
+
+    if "axis_name" not in current_metadata:
+        current_metadata["axis_name"] = sweep_params
+
+    if "start_datetime" not in current_metadata:
+        current_metadata["start_datetime"] = start_datetime
+
+    if "duration" not in current_metadata:
+        current_metadata["duration"] = 0
+
+    current_metadata["duration_seconds"] += (
+        end_datetime - start_datetime
+    ).total_seconds()
+
+    return current_metadata
+
+
 def run(experiment: Experiment) -> None:
-    if not isinstance(experiment, Experiment):
-        raise TypeError("run expects an Experiment")
+    write_source_patch_if_not_exists(experiment)
 
     for sweep in experiment.sweeps:
-        run_directories = [
-            resolve_and_open_run(experiment, sweep, item, experiment.patch)
-            for item in sweep.runs
+        run_file_handlers = [
+            get_run_file_handler(experiment, sweep, item) for item in sweep.runs
         ]
 
-        for axis_value in sweep.axis_vals:
-            for item, run_directory in zip(sweep.runs, run_directories):
-                point = {**sweep.params, **item.params, sweep.axis_name: axis_value}
+        for item, run_file_handler in zip(sweep.runs, run_file_handlers):
+            start_datetime = datetime.datetime.now()
 
-                if run_directory.has_row({sweep.axis_name: axis_value}):
+            for axis_value in sweep.axis_vals:
+                if run_file_handler.has_datapoint(sweep.axis_name, axis_value):
+                    print(
+                        f"Datapoint for {sweep.axis_name}={axis_value} exists. Skipping simulation."
+                    )
                     continue
 
-                metrics = item.evaluate_func(point)
+                sim_params = {
+                    **sweep.params,
+                    **item.params,
+                    sweep.axis_name: axis_value,
+                }
 
-                if not isinstance(metrics, dict):
-                    raise TypeError("evaluator must return a dictionary")
-                if set(metrics) & set(point):
+                metrics = item.evaluate_func(sim_params)
+                print(f"{sweep.axis_name}={axis_value}: {metrics}")
+
+                if not metrics.keys().isdisjoint(sim_params.keys()):
                     raise ValueError("evaluator metrics overlap parameter names")
 
-                run_directory.append({**point, **metrics})
+                run_file_handler.append_datapoint(
+                    {**sim_params, **metrics, sweep.axis_name: axis_value}
+                )
+
+            end_datetime = datetime.datetime.now()
+
+            current_metadata = run_file_handler.read_metadata()
+            run_file_handler.write_metadata(
+                _append_metadata(
+                    current_metadata,
+                    start_datetime,
+                    end_datetime,
+                    sweep.params,
+                    sweep.axis_name,
+                )
+            )

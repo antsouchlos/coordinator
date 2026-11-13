@@ -1,9 +1,3 @@
-"""Git revision and selected worktree patch used as attempt provenance.
-
-The patch includes files matched by .coordinatorinclude and excludes ignored files.
-Without include rules, all nonignored changed files are selected.
-"""
-
 import hashlib
 import os
 import subprocess
