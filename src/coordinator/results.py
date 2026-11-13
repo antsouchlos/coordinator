@@ -26,7 +26,7 @@ class RunFileHandler:
             return False
 
         df = pd.read_csv(self.data_path)
-        return np.any(np.isclose(np.array(df[axis_name])), axis_value)  # type: ignore[]
+        return np.any(np.isclose(np.array(df[axis_name]), axis_value))  # type: ignore[]
 
     def append_datapoint(self, point: dict):
         df = pd.DataFrame([point])

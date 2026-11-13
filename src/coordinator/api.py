@@ -9,10 +9,14 @@ def _append_metadata(
     start_datetime: datetime.datetime,
     end_datetime: datetime.datetime,
     sweep_params: dict,
+    run_params: dict,
     axis_name: str,
 ) -> dict:
     if "sweep_params" not in current_metadata:
         current_metadata["sweep_params"] = sweep_params
+
+    if "run_params" not in current_metadata:
+        current_metadata["run_params"] = run_params
 
     if "axis_name" not in current_metadata:
         current_metadata["axis_name"] = axis_name
@@ -41,7 +45,7 @@ def run(experiment: Experiment) -> None:
         ]
 
         for item, run_file_handler in zip(sweep.runs, run_file_handlers):
-            start_datetime = datetime.datetime.now()
+            current_metadata = run_file_handler.read_metadata()
 
             for axis_value in sweep.axis_vals:
                 if run_file_handler.has_datapoint(sweep.axis_name, axis_value):
@@ -56,7 +60,10 @@ def run(experiment: Experiment) -> None:
                     sweep.axis_name: axis_value,
                 }
 
+                start_datetime = datetime.datetime.now()
                 metrics = item.evaluate_func(sim_params)
+                end_datetime = datetime.datetime.now()
+
                 print(f"{sweep.axis_name}={axis_value}: {metrics}")
 
                 if not metrics.keys().isdisjoint(sim_params.keys()):
@@ -66,15 +73,13 @@ def run(experiment: Experiment) -> None:
                     {**sim_params, **metrics, sweep.axis_name: axis_value}
                 )
 
-            end_datetime = datetime.datetime.now()
-
-            current_metadata = run_file_handler.read_metadata()
-            run_file_handler.write_metadata(
-                _append_metadata(
+                current_metadata = _append_metadata(
                     current_metadata,
                     start_datetime,
                     end_datetime,
                     sweep.params,
+                    item.params,
                     sweep.axis_name,
                 )
-            )
+
+                run_file_handler.write_metadata(current_metadata)
