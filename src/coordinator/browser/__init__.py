@@ -183,7 +183,7 @@ def scan_results(root: Path | str | None = None) -> tuple[list[ResultRun], list[
             if not isinstance(metadata, dict):
                 raise ValueError("metadata is not an object")
 
-            axis = metadata["axis"]
+            axis = metadata.get("axis_name", metadata.get("axis"))
 
             if not isinstance(axis, str) or not axis:
                 raise ValueError("axis must be a nonempty string")
@@ -210,7 +210,7 @@ def scan_results(root: Path | str | None = None) -> tuple[list[ResultRun], list[
                 else run_dir.name[:8],
                 revision=str(metadata.get("revision", parts[-1])),
                 attempt=attempt,
-                started=str(metadata.get("started", "")),
+                started=str(metadata.get("start_datetime", metadata.get("started", ""))),
                 axis=axis,
                 params=params,
                 shared=shared,
@@ -254,7 +254,8 @@ def load_selected(
         numeric = {
             column
             for column in frame.columns
-            if column != axis and pd.api.types.is_numeric_dtype(frame[column])
+            if column not in {axis, *run.params, *run.shared}
+            and pd.api.types.is_numeric_dtype(frame[column])
         }
         metrics = numeric if metrics is None else metrics & numeric
         loaded.append((run, frame))

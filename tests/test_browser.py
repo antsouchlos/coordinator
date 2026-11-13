@@ -3,6 +3,7 @@ import json
 import pandas as pd
 import pytest
 
+from coordinator import Experiment, Run, Sweep, run
 from coordinator.browser import (
     delete_result,
     load_selected,
@@ -11,6 +12,7 @@ from coordinator.browser import (
     scan_results,
 )
 from coordinator.browser.settings import make_default_settings, remap_paths
+from coordinator.results import get_results_root
 
 
 def write_run(
@@ -57,6 +59,40 @@ def test_scan_new_depth_and_patch(tmp_path):
     assert item.patch_path == path.parent.parent / "source.patch"
     assert item.params == {"samples": 10} and item.shared == {"bias": 0.1}
     assert item.label == "ccc3333"[:8]
+
+
+def test_scan_and_plot_api_generated_run(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    get_results_root.cache_clear()
+
+    try:
+        experiment = Experiment(
+            "exp",
+            [
+                Sweep(
+                    {"bias": 0.1},
+                    "noise",
+                    [1, 2],
+                    [Run({"samples": 10}, lambda params: {"score": params["noise"] * 2})],
+                )
+            ],
+        )
+        run(experiment)
+
+        runs, warnings = scan_results(get_results_root())
+        assert warnings == []
+        assert len(runs) == 1
+        assert runs[0].axis == "noise"
+        assert runs[0].shared == {"bias": 0.1}
+        assert runs[0].params == {"samples": 10}
+        assert runs[0].started == runs[0].metadata["start_datetime"]
+
+        axis, loaded, metrics = load_selected(runs)
+        assert axis == "noise"
+        assert metrics == ["score"]
+        assert len(make_figure(axis, loaded, "score").data) == 1
+    finally:
+        get_results_root.cache_clear()
 
 
 def test_scan_reports_invalid_runs(tmp_path):
