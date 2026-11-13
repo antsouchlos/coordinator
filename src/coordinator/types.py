@@ -42,7 +42,7 @@ def _serialize_identity(identity: dict) -> str:
 
 
 def _get_identity_hash(identity: dict) -> str:
-    return hashlib.sha256(_serialize_identity(identity).encode()).hexdigest()
+    return hashlib.sha256(_serialize_identity(identity).encode()).hexdigest()[:7]
 
 
 @dataclass(frozen=True, init=False)

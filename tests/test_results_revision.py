@@ -58,9 +58,6 @@ def test_ids_depend_on_full_axis_list_and_parameters(repo):
     other_sweep = make_experiment(sweep_params={"bias": 2})
     other_run = make_experiment(run_params={"power": 3})
     assert base.attempt_id.value() == run_git(repo, "rev-parse", "--short=7", "HEAD")
-    assert (
-        len(base.sweeps[0].id.value()) == len(base.sweeps[0].runs[0].id.value()) == 64
-    )
     assert other_values.sweeps[0].id.value() != base.sweeps[0].id.value()
     assert (
         other_values.sweeps[0].runs[0].id.value() != base.sweeps[0].runs[0].id.value()
@@ -78,11 +75,11 @@ def test_ids_depend_on_full_axis_list_and_parameters(repo):
     }
     expected_sweep_id = hashlib.sha256(
         json.dumps(sweep_payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    ).hexdigest()[:7]
     run_payload = {"params": {"power": 2}, "sweep_id": expected_sweep_id}
     expected_run_id = hashlib.sha256(
         json.dumps(run_payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    ).hexdigest()[:7]
     assert isinstance(base.attempt_id, AttemptId)
     assert isinstance(sweep.id, SweepId)
     assert isinstance(sweep.runs[0].id, RunId)
