@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useContent } from "./bridge";
+import { HighlightedText } from "./highlight";
 import { labelParts, valueText } from "./types";
 import type { Kind, PanelKind, Response, Rpc, Run } from "./types";
 
@@ -223,8 +224,10 @@ export function PatchPanel({
             "Loading…"
           ) : state.error ? (
             <span className="coordinator-error">{state.error}</span>
+          ) : state.data?.text === "No source patch for this revision." ? (
+            <pre>{state.data.text}</pre>
           ) : (
-            <pre>{state.data?.text}</pre>
+            <HighlightedText text={state.data?.text || ""} language="diff" />
           )}
         </div>
       )}
@@ -529,7 +532,7 @@ function RunRow({
           ) : metadata.error ? (
             <span className="coordinator-error">{metadata.error}</span>
           ) : (
-            <pre>{metadata.data?.text}</pre>
+            <HighlightedText text={metadata.data?.text || ""} language="json" />
           )}
         </div>
       )}

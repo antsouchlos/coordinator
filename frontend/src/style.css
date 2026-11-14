@@ -11,6 +11,14 @@
   --gruvbox-gray: #928374;
   --gruvbox-orange: #d65d0e;
   --gruvbox-purple: #b16286;
+  --syntax-add: #79740e;
+  --syntax-remove: #cc241d;
+  --syntax-header: #458588;
+  --syntax-hunk: #b16286;
+  --syntax-key: #458588;
+  --syntax-string: #79740e;
+  --syntax-number: #b16286;
+  --syntax-literal: #d65d0e;
   --heading-gap: 12px;
   box-sizing: border-box;
   width: 100%;
@@ -23,6 +31,14 @@ body[data-jp-theme-light="false"] .coordinator-browser,
 html[data-jp-theme-light="false"] .coordinator-browser {
   --gruvbox-orange: #fe8019;
   --gruvbox-purple: #d3869b;
+  --syntax-add: #b8bb26;
+  --syntax-remove: #fb4934;
+  --syntax-header: #83a598;
+  --syntax-hunk: #d3869b;
+  --syntax-key: #83a598;
+  --syntax-string: #b8bb26;
+  --syntax-number: #d3869b;
+  --syntax-literal: #fe8019;
 }
 .coordinator-browser * {
   box-sizing: border-box;
@@ -335,6 +351,30 @@ html[data-jp-theme-light="false"] .coordinator-browser {
   white-space: pre;
   font: inherit;
   font-family: var(--jp-code-font-family, ui-monospace, monospace);
+}
+.coordinator-highlight .coordinator-diff-header {
+  color: var(--syntax-header);
+}
+.coordinator-highlight .coordinator-diff-hunk {
+  color: var(--syntax-hunk);
+}
+.coordinator-highlight .coordinator-diff-add {
+  color: var(--syntax-add);
+}
+.coordinator-highlight .coordinator-diff-remove {
+  color: var(--syntax-remove);
+}
+.coordinator-highlight .coordinator-json-key {
+  color: var(--syntax-key);
+}
+.coordinator-highlight .coordinator-json-string {
+  color: var(--syntax-string);
+}
+.coordinator-highlight .coordinator-json-number {
+  color: var(--syntax-number);
+}
+.coordinator-highlight .coordinator-json-literal {
+  color: var(--syntax-literal);
 }
 .coordinator-table-outer {
   max-width: 100%;
