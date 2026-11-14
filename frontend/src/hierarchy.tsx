@@ -28,6 +28,9 @@ type TreeProps = {
   panelOpen: (kind: PanelKind, path: string) => boolean;
   togglePanel: (kind: PanelKind, path: string) => void;
   toggleAllPanels: (kind: GroupKind, path: string, open: boolean) => void;
+  previewPatchWidth: (width: number) => void;
+  commitPatchWidth: (width: number) => void;
+  resetPatchWidth: () => void;
   select: (
     kind: "run" | "sweep" | "attempt",
     path: string,
@@ -210,6 +213,9 @@ function AttemptCard({
             toggle={() => props.togglePanel("patch", path)}
             rpc={props.rpc}
             generation={props.generation}
+            previewWidth={props.previewPatchWidth}
+            commitWidth={props.commitPatchWidth}
+            resetWidth={props.resetPatchWidth}
           />
         </div>
       )}

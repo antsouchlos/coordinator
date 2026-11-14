@@ -11,7 +11,7 @@ from coordinator.browser import (
     rename_result,
     scan_results,
 )
-from coordinator.browser.settings import make_default_settings, remap_paths
+from coordinator.browser.settings import load_settings, make_default_settings, remap_paths
 from coordinator.results import get_results_root
 
 
@@ -265,6 +265,36 @@ def test_react_browser_controller_scopes_bulk_panel_toggles(tmp_path):
         reloaded.dispatch("panel_all", {"generation": 0, "kind": "data", "path": "first", "open": False})
     with pytest.raises(ValueError, match="Result is no longer available"):
         reloaded.dispatch("panel_all", {"generation": 0, "kind": "attempt", "path": "missing", "open": False})
+
+
+def test_source_patch_width_persists_and_legacy_settings_load(tmp_path, monkeypatch):
+    from coordinator.browser.controller import BrowserController
+
+    settings_path = tmp_path / "settings.json"
+    legacy = make_default_settings()
+    del legacy["patch_width"]
+    settings_path.write_text(json.dumps(legacy))
+    assert load_settings(settings_path)["patch_width"] is None
+
+    browser = BrowserController(tmp_path, settings_path)
+    response = browser.dispatch("patch_width", {"generation": 0, "width": 560})
+    assert response["settings"]["patch_width"] == 560
+    assert json.loads(settings_path.read_text())["patch_width"] == 560
+    assert BrowserController(tmp_path, settings_path).snapshot()["settings"]["patch_width"] == 560
+
+    for width in (179, 1601, True, 400.5, None):
+        with pytest.raises(ValueError, match="Invalid source patch width"):
+            browser.dispatch("patch_width", {"generation": 0, "width": width})
+    assert browser.settings["patch_width"] == 560
+
+    def failed_save(*_args):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr("coordinator.browser.controller.save_settings", failed_save)
+    failed = browser.dispatch("patch_width", {"generation": 0, "width": 600})
+    assert failed["settings"]["patch_width"] == 560
+    assert "disk unavailable" in failed["settings_error"]
+    assert json.loads(settings_path.read_text())["patch_width"] == 560
 
 
 def test_large_index_is_metadata_only(tmp_path, monkeypatch):

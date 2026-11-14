@@ -12,6 +12,8 @@ PANEL_DEFAULTS = {
     "data": False,
     "metadata": False,
 }
+PATCH_WIDTH_MIN = 180
+PATCH_WIDTH_MAX = 1600
 
 
 def make_default_settings() -> dict:
@@ -20,6 +22,7 @@ def make_default_settings() -> dict:
         "plot": {"metric": None, "logx": False, "logy": False},
         "selected_runs": [],
         "panels": {kind: {} for kind in PANEL_DEFAULTS},
+        "patch_width": None,
     }
 
 
@@ -59,6 +62,7 @@ def load_settings(path: Path) -> dict:
     plot = data.get("plot")
     selected = data.get("selected_runs")
     panels = data.get("panels")
+    patch_width = data.get("patch_width")
 
     if (
         not isinstance(plot, dict)
@@ -77,6 +81,11 @@ def load_settings(path: Path) -> dict:
         raise ValueError("Selected runs must have relative paths.")
     if set(panels) - set(PANEL_DEFAULTS):
         raise ValueError("Settings contain an unknown panel type.")
+    if patch_width is not None and (
+        type(patch_width) is not int
+        or not PATCH_WIDTH_MIN <= patch_width <= PATCH_WIDTH_MAX
+    ):
+        raise ValueError("Invalid source patch width.")
 
     for kind in PANEL_DEFAULTS:
         items = panels.get(kind, {})
@@ -92,6 +101,7 @@ def load_settings(path: Path) -> dict:
         "plot": {"metric": metric, "logx": plot["logx"], "logy": plot["logy"]},
         "selected_runs": sorted(set(selected)),
         "panels": {kind: dict(panels.get(kind, {})) for kind in PANEL_DEFAULTS},
+        "patch_width": patch_width,
     }
 
 

@@ -200,16 +200,107 @@ export function PatchPanel({
   toggle,
   rpc,
   generation,
+  previewWidth,
+  commitWidth,
+  resetWidth,
 }: {
   path: string;
   open: boolean;
   toggle: () => void;
   rpc: Rpc;
   generation: number;
+  previewWidth: (width: number) => void;
+  commitWidth: (width: number) => void;
+  resetWidth: () => void;
 }) {
   const state = useContent(rpc, generation, "patch", path, open);
+  const drag = useRef<{
+    pointerId: number;
+    x: number;
+    width: number;
+    max: number;
+    next: number;
+  } | null>(null);
+  const constrain = (width: number, max: number) =>
+    Math.max(Math.min(180, max), Math.min(max, Math.round(width)));
   return (
     <div className={`coordinator-patch ${open ? "" : "closed"}`}>
+      {open && (
+        <div
+          className="coordinator-patch-resize"
+          role="separator"
+          aria-label="Resize source patch"
+          aria-orientation="vertical"
+          tabIndex={0}
+          title="Drag to resize source patches"
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            const patch = event.currentTarget.parentElement;
+            const body = patch?.parentElement;
+            if (!patch || !body) return;
+            const max = Math.min(
+              1600,
+              Math.floor(body.getBoundingClientRect().width * 0.6),
+            );
+            const width = Math.round(patch.getBoundingClientRect().width);
+            drag.current = {
+              pointerId: event.pointerId,
+              x: event.clientX,
+              width,
+              max,
+              next: width,
+            };
+            event.currentTarget.setPointerCapture(event.pointerId);
+            event.preventDefault();
+          }}
+          onPointerMove={(event) => {
+            const active = drag.current;
+            if (!active || active.pointerId !== event.pointerId) return;
+            active.next = constrain(
+              active.width + active.x - event.clientX,
+              active.max,
+            );
+            previewWidth(active.next);
+          }}
+          onPointerUp={(event) => {
+            const active = drag.current;
+            if (!active || active.pointerId !== event.pointerId) return;
+            active.next = constrain(
+              active.width + active.x - event.clientX,
+              active.max,
+            );
+            drag.current = null;
+            event.currentTarget.releasePointerCapture(event.pointerId);
+            if (active.next !== active.width) commitWidth(active.next);
+            else resetWidth();
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+            resetWidth();
+          }}
+          onLostPointerCapture={() => {
+            if (drag.current) {
+              drag.current = null;
+              resetWidth();
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            const patch = event.currentTarget.parentElement;
+            const body = patch?.parentElement;
+            if (!patch || !body) return;
+            event.preventDefault();
+            const max = Math.min(
+              1600,
+              Math.floor(body.getBoundingClientRect().width * 0.6),
+            );
+            const width = patch.getBoundingClientRect().width;
+            commitWidth(
+              constrain(width + (event.key === "ArrowLeft" ? 20 : -20), max),
+            );
+          }}
+        />
+      )}
       <button
         onClick={toggle}
         aria-label={open ? "Close source patch" : "Open source patch"}
@@ -276,12 +367,29 @@ export function RunTable({
     [runs],
   );
   const scroll = useRef<HTMLDivElement>(null);
+  const outer = useRef<HTMLDivElement>(null);
+  const table = useRef<HTMLDivElement>(null);
+  const [horizontalOverflow, setHorizontalOverflow] = useState(false);
   const virtual = useVirtualizer({
     count: runs.length,
     getScrollElement: () => scroll.current,
-    estimateSize: () => 74,
+    estimateSize: () => 52,
     overscan: 6,
   });
+  useEffect(() => {
+    if (!outer.current || !table.current) return;
+    const container = outer.current;
+    const content = table.current;
+    const update = () =>
+      setHorizontalOverflow(
+        content.getBoundingClientRect().width > container.clientWidth + 1,
+      );
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    observer.observe(content);
+    update();
+    return () => observer.disconnect();
+  }, []);
   const every = allMembers.every((r) => selected.has(r.path));
   const some = allMembers.some((r) => selected.has(r.path));
   const checkbox = useRef<HTMLInputElement>(null);
@@ -306,9 +414,13 @@ export function RunTable({
   const columnWidths = [220, ...valueWidths, 90, 184];
   const columns = columnWidths.map((width) => `${width}px`).join(" ");
   return (
-    <div className="coordinator-table-outer">
+    <div
+      className={`coordinator-table-outer${horizontalOverflow ? " coordinator-table-overflow" : ""}`}
+      ref={outer}
+    >
       <div
         className="coordinator-table"
+        ref={table}
         style={{ width: columnWidths.reduce((sum, width) => sum + width, 16) }}
       >
         <div
@@ -343,7 +455,7 @@ export function RunTable({
           className="coordinator-run-scroll"
           ref={scroll}
           style={{
-            height: Math.min(550, Math.max(80, virtual.getTotalSize())),
+            height: Math.min(550, virtual.getTotalSize()),
           }}
         >
           <div style={{ height: virtual.getTotalSize(), position: "relative" }}>

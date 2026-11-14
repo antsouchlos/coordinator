@@ -177,7 +177,7 @@ html[data-jp-theme-light="false"] .coordinator-browser {
 .coordinator-sweep {
   border-left: 2px solid var(--line);
   border-bottom: 2px solid var(--line);
-  padding: 6px 8px 8px;
+  padding: 6px 8px 4px;
   margin: 0 0 8px;
 }
 .coordinator-heading {
@@ -295,7 +295,10 @@ html[data-jp-theme-light="false"] .coordinator-browser {
 }
 .coordinator-attempt-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, min(35%, 420px));
+  grid-template-columns: minmax(0, 1fr) minmax(
+      0,
+      min(var(--patch-width, min(35%, 420px)), 60%)
+    );
   gap: 12px;
   margin-top: var(--heading-gap);
   width: 100%;
@@ -308,12 +311,39 @@ html[data-jp-theme-light="false"] .coordinator-browser {
   min-width: 0;
 }
 .coordinator-patch {
+  position: relative;
   border: 1px solid var(--line);
   padding: 6px;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   align-self: start;
+}
+.coordinator-patch-resize {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: -5px;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+.coordinator-patch-resize::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--gruvbox-orange);
+  opacity: 0;
+  pointer-events: none;
+}
+.coordinator-patch-resize:hover::after,
+.coordinator-patch-resize:active::after,
+.coordinator-patch-resize:focus-visible::after {
+  opacity: 1;
 }
 .coordinator-patch.closed {
   width: 32px;
@@ -379,8 +409,10 @@ html[data-jp-theme-light="false"] .coordinator-browser {
 .coordinator-table-outer {
   max-width: 100%;
   overflow-x: auto;
-  padding-bottom: 12px;
   margin-top: var(--heading-gap);
+}
+.coordinator-table-overflow {
+  padding-bottom: 12px;
 }
 .coordinator-table {
   font-size: inherit;
@@ -401,7 +433,7 @@ html[data-jp-theme-light="false"] .coordinator-browser {
 }
 .coordinator-table-row > div {
   min-width: 0;
-  min-height: 62px;
+  min-height: 52px;
   padding: 5px 7px;
   border-bottom: 1px solid var(--subtle-line);
   white-space: nowrap;
@@ -482,8 +514,12 @@ html[data-jp-theme-light="false"] .coordinator-browser {
   padding: 3px 7px;
 }
 @media (max-width: 850px) {
-  .coordinator-attempt-body {
+  .coordinator-attempt-body,
+  .coordinator-attempt-body-patch-closed {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .coordinator-patch-resize {
+    display: none;
   }
   .coordinator-patch.closed {
     justify-self: start;

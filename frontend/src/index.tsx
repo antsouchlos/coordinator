@@ -3,6 +3,7 @@ import React, {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
@@ -29,7 +30,16 @@ function App({ model }: { model: Model }) {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const browser = useRef<HTMLDivElement>(null);
   const generation = snapshot?.generation ?? 0;
+  const previewPatchWidth = (width: number) => {
+    browser.current?.style.setProperty("--patch-width", `${width}px`);
+  };
+  const resetPatchWidth = () => {
+    const width = snapshot?.settings.patch_width;
+    if (width == null) browser.current?.style.removeProperty("--patch-width");
+    else previewPatchWidth(width);
+  };
   const absorb = useCallback((response: Response) => {
     if (response.snapshot) setSnapshot(response.snapshot);
     else if (response.settings)
@@ -71,6 +81,17 @@ function App({ model }: { model: Model }) {
     },
     [rpc, generation, absorb],
   );
+  useEffect(() => {
+    resetPatchWidth();
+  }, [snapshot?.settings.patch_width]);
+  const commitPatchWidth = (width: number) => {
+    previewPatchWidth(width);
+    action("patch_width", { width })
+      .then((response) => {
+        if (response.settings_error) resetPatchWidth();
+      })
+      .catch(resetPatchWidth);
+  };
   const plotKey = snapshot
     ? JSON.stringify([
         snapshot.generation,
@@ -240,7 +261,7 @@ function App({ model }: { model: Model }) {
     0,
   );
   return (
-    <div className="coordinator-browser">
+    <div className="coordinator-browser" ref={browser}>
       <h2>Simulation results</h2>
       <div className="coordinator-plot-area">
         <div className="coordinator-plot-controls">
@@ -323,6 +344,9 @@ function App({ model }: { model: Model }) {
         panelOpen={panelOpen}
         togglePanel={togglePanel}
         toggleAllPanels={toggleAllPanels}
+        previewPatchWidth={previewPatchWidth}
+        commitPatchWidth={commitPatchWidth}
+        resetPatchWidth={resetPatchWidth}
         select={select}
         mutate={mutate}
       />

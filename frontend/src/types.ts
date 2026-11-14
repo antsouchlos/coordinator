@@ -17,6 +17,7 @@ export type Settings = {
   plot: { metric: string | null; logx: boolean; logy: boolean };
   selected_runs: string[];
   panels: Record<PanelKind, Record<string, boolean>>;
+  patch_width: number | null;
 };
 export type Snapshot = {
   generation: number;

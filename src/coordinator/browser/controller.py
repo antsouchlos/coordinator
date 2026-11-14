@@ -11,6 +11,8 @@ from coordinator.browser import delete_result, make_figure, rename_result
 from coordinator.browser.index import ResultIndex
 from coordinator.browser.settings import (
     PANEL_DEFAULTS,
+    PATCH_WIDTH_MAX,
+    PATCH_WIDTH_MIN,
     get_default_settings_path,
     load_settings,
     make_default_settings,
@@ -37,14 +39,16 @@ class BrowserController:
         self._content: OrderedDict[str, tuple[tuple[int, int], object]] = OrderedDict()
         self._reconcile()
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
         if not self.settings_writable:
-            return
+            return False
         try:
             save_settings(self.settings_path, self.settings)
             self.settings_error = ""
+            return True
         except OSError as exc:
             self.settings_error = f"Could not save browser settings to {self.settings_path}: {exc}"
+            return False
 
     def _reconcile(self) -> None:
         if not self.root.is_dir():
@@ -244,6 +248,15 @@ class BrowserController:
                 raise ValueError("Invalid plot settings.")
             self.settings["plot"] = {"metric": metric, "logx": logx, "logy": logy}
             self._save()
+            return {"settings": self.settings, "settings_error": self.settings_error}
+        if action == "patch_width":
+            width = payload.get("width")
+            if type(width) is not int or not PATCH_WIDTH_MIN <= width <= PATCH_WIDTH_MAX:
+                raise ValueError("Invalid source patch width.")
+            previous = self.settings["patch_width"]
+            self.settings["patch_width"] = width
+            if not self._save():
+                self.settings["patch_width"] = previous
             return {"settings": self.settings, "settings_error": self.settings_error}
         if action in {"rename", "delete"}:
             kind, path = payload.get("kind"), payload.get("path")
