@@ -209,6 +209,23 @@ class BrowserController:
                 panels[path] = opened
             self._save()
             return {"settings": self.settings, "settings_error": self.settings_error}
+        if action == "panel_all":
+            kind, path, opened = payload.get("kind"), payload.get("path"), payload.get("open")
+            if kind not in {"experiment", "attempt", "sweep"} or not isinstance(opened, bool):
+                raise ValueError("Invalid panel state.")
+            self._path(kind, path)
+            paths = self.index.paths(kind)
+            if kind != "experiment":
+                parent = path.rsplit("/", 1)[0]
+                paths = {item for item in paths if item.rsplit("/", 1)[0] == parent}
+            panels = self.settings["panels"][kind]
+            for item in paths:
+                if opened == PANEL_DEFAULTS[kind]:
+                    panels.pop(item, None)
+                else:
+                    panels[item] = opened
+            self._save()
+            return {"settings": self.settings, "settings_error": self.settings_error}
         if action == "select":
             kind, path, checked = payload.get("kind"), payload.get("path"), payload.get("checked")
             if not isinstance(checked, bool):

@@ -222,6 +222,51 @@ def test_react_browser_controller_preserves_settings_and_paths(tmp_path):
     assert browser.settings["selected_runs"] == []
 
 
+def test_react_browser_controller_scopes_bulk_panel_toggles(tmp_path):
+    from coordinator.browser.controller import BrowserController
+
+    write_run(tmp_path, experiment="first", attempt="a@1", sweep="s@1", name="r@1")
+    write_run(tmp_path, experiment="first", attempt="a@1", sweep="v@4", name="r@4")
+    write_run(tmp_path, experiment="first", attempt="b@2", sweep="t@2", name="r@2")
+    write_run(tmp_path, experiment="second", attempt="c@3", sweep="u@3", name="r@3")
+    settings_path = tmp_path / "settings.json"
+    browser = BrowserController(tmp_path, settings_path)
+
+    def panel(kind, path, opened):
+        return browser.dispatch("panel", {"generation": 0, "kind": kind, "path": path, "open": opened})
+
+    def panel_all(kind, path, opened):
+        return browser.dispatch("panel_all", {"generation": 0, "kind": kind, "path": path, "open": opened})
+
+    panel("attempt", "second/c@3", False)
+    panel("sweep", "first/b@2/t@2", False)
+    panel_all("experiment", "first", False)
+    panel_all("attempt", "first/a@1", False)
+    panel_all("sweep", "first/a@1/s@1", False)
+
+    assert browser.settings["panels"]["experiment"] == {"first": False, "second": False}
+    assert browser.settings["panels"]["attempt"] == {
+        "first/a@1": False, "first/b@2": False, "second/c@3": False,
+    }
+    assert browser.settings["panels"]["sweep"] == {
+        "first/a@1/s@1": False, "first/a@1/v@4": False, "first/b@2/t@2": False,
+    }
+
+    reloaded = BrowserController(tmp_path, settings_path)
+    assert reloaded.settings["panels"] == browser.settings["panels"]
+    reloaded.dispatch("panel_all", {"generation": 0, "kind": "experiment", "path": "first", "open": True})
+    reloaded.dispatch("panel_all", {"generation": 0, "kind": "attempt", "path": "first/a@1", "open": True})
+    reloaded.dispatch("panel_all", {"generation": 0, "kind": "sweep", "path": "first/a@1/s@1", "open": True})
+    assert reloaded.settings["panels"]["experiment"] == {}
+    assert reloaded.settings["panels"]["attempt"] == {"second/c@3": False}
+    assert reloaded.settings["panels"]["sweep"] == {"first/b@2/t@2": False}
+
+    with pytest.raises(ValueError, match="Invalid panel state"):
+        reloaded.dispatch("panel_all", {"generation": 0, "kind": "data", "path": "first", "open": False})
+    with pytest.raises(ValueError, match="Result is no longer available"):
+        reloaded.dispatch("panel_all", {"generation": 0, "kind": "attempt", "path": "missing", "open": False})
+
+
 def test_large_index_is_metadata_only(tmp_path, monkeypatch):
     from coordinator.browser.controller import BrowserController
 

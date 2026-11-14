@@ -351,7 +351,7 @@ export function RunTable({
                   key={run.path}
                   data-index={v.index}
                   ref={virtual.measureElement}
-                  className="coordinator-virtual-row"
+                  className={`coordinator-virtual-row${v.index === runs.length - 1 ? " coordinator-final-row" : ""}`}
                   style={{
                     position: "absolute",
                     top: 0,

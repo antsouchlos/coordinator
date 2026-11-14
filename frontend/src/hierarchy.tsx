@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
   Chevron,
   EditableName,
@@ -27,6 +27,7 @@ type TreeProps = {
   generation: number;
   panelOpen: (kind: PanelKind, path: string) => boolean;
   togglePanel: (kind: PanelKind, path: string) => void;
+  toggleAllPanels: (kind: GroupKind, path: string, open: boolean) => void;
   select: (
     kind: "run" | "sweep" | "attempt",
     path: string,
@@ -40,6 +41,16 @@ type TreeProps = {
   ) => Promise<Response>;
 };
 type SharedProps = Omit<TreeProps, "grouped" | "searching">;
+type GroupKind = "experiment" | "attempt" | "sweep";
+
+function isHeadingToggleTarget(target: EventTarget) {
+  if (!(target instanceof Element)) return true;
+  const control = target.closest("button, input, a, select, textarea");
+  return (
+    !control ||
+    control.matches(".coordinator-disclosure, .coordinator-chevron-button")
+  );
+}
 
 function Heading({
   kind,
@@ -48,31 +59,59 @@ function Heading({
   extra,
   panelOpen,
   togglePanel,
+  toggleAllPanels,
   mutate,
-}: Pick<TreeProps, "panelOpen" | "togglePanel" | "mutate"> & {
-  kind: Kind;
+}: Pick<
+  TreeProps,
+  "panelOpen" | "togglePanel" | "toggleAllPanels" | "mutate"
+> & {
+  kind: GroupKind;
   path: string;
   name: string;
   extra: React.ReactNode;
 }) {
   const open = panelOpen(kind, path);
+  const clickTimer = useRef<number | null>(null);
+  const firstClickOpen = useRef<boolean | null>(null);
+  useEffect(
+    () => () => {
+      if (clickTimer.current !== null) window.clearTimeout(clickTimer.current);
+    },
+    [],
+  );
   return (
     <div
       className="coordinator-heading"
       onClick={(event) => {
-        if (
-          event.target instanceof Element &&
-          event.target.closest("button, input, a, select, textarea")
-        )
+        if (!isHeadingToggleTarget(event.target)) return;
+        if (clickTimer.current !== null) {
+          window.clearTimeout(clickTimer.current);
+          clickTimer.current = null;
+        }
+        if (event.detail > 1) return;
+        if (event.detail === 0) {
+          firstClickOpen.current = null;
+          togglePanel(kind, path);
           return;
-        togglePanel(kind, path);
+        }
+        firstClickOpen.current = open;
+        clickTimer.current = window.setTimeout(() => {
+          clickTimer.current = null;
+          togglePanel(kind, path);
+        }, 300);
+      }}
+      onDoubleClick={(event) => {
+        if (!isHeadingToggleTarget(event.target)) return;
+        event.preventDefault();
+        if (clickTimer.current !== null) {
+          window.clearTimeout(clickTimer.current);
+          clickTimer.current = null;
+        }
+        toggleAllPanels(kind, path, !(firstClickOpen.current ?? open));
+        firstClickOpen.current = null;
       }}
     >
-      <button
-        className="coordinator-disclosure"
-        aria-expanded={open}
-        onClick={() => togglePanel(kind, path)}
-      >
+      <button className="coordinator-disclosure" aria-expanded={open}>
         <span className="coordinator-prefix">
           {kind[0].toUpperCase() + kind.slice(1)}:{" "}
         </span>
@@ -82,7 +121,7 @@ function Heading({
       <button
         className="coordinator-chevron-button"
         aria-label={`Toggle ${kind}`}
-        onClick={() => togglePanel(kind, path)}
+        aria-expanded={open}
       >
         <Chevron open={open} />
       </button>
@@ -140,6 +179,7 @@ function AttemptCard({
       : dates.length === 1
         ? dates[0]
         : `${dates[0]} – ${dates[dates.length - 1]}`;
+  const patchOpen = props.panelOpen("patch", path);
   return (
     <section className="coordinator-card coordinator-attempt">
       <Heading
@@ -150,7 +190,9 @@ function AttemptCard({
         {...props}
       />
       {props.panelOpen("attempt", path) && (
-        <div className="coordinator-attempt-body">
+        <div
+          className={`coordinator-attempt-body${patchOpen ? "" : " coordinator-attempt-body-patch-closed"}`}
+        >
           <div>
             <VirtualBlocks
               items={attempt.sweeps}
@@ -164,7 +206,7 @@ function AttemptCard({
           </div>
           <PatchPanel
             path={path}
-            open={props.panelOpen("patch", path)}
+            open={patchOpen}
             toggle={() => props.togglePanel("patch", path)}
             rpc={props.rpc}
             generation={props.generation}

@@ -194,6 +194,13 @@ function App({ model }: { model: Model }) {
       () => {},
     );
   };
+  const toggleAllPanels = (
+    kind: "experiment" | "attempt" | "sweep",
+    path: string,
+    open: boolean,
+  ) => {
+    action("panel_all", { kind, path, open }).catch(() => {});
+  };
   const select = (
     kind: "attempt" | "sweep" | "run",
     path: string,
@@ -282,7 +289,7 @@ function App({ model }: { model: Model }) {
           onClick={() => action("clear_selection").catch(() => {})}
           disabled={busy || selected.size === 0}
         >
-          Clear plot
+          Clear run selection
         </button>
       </div>
       <div className="coordinator-summary">
@@ -315,6 +322,7 @@ function App({ model }: { model: Model }) {
         generation={generation}
         panelOpen={panelOpen}
         togglePanel={togglePanel}
+        toggleAllPanels={toggleAllPanels}
         select={select}
         mutate={mutate}
       />
