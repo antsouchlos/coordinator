@@ -41,12 +41,6 @@ html[data-jp-theme-light="false"] .coordinator-browser {
 .coordinator-browser * {
   box-sizing: border-box;
 }
-.coordinator-browser h2 {
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  margin: 0 0 16px;
-}
 .coordinator-browser button,
 .coordinator-browser input,
 .coordinator-browser select {

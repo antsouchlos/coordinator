@@ -231,7 +231,6 @@ function App({ model }: { model: Model }) {
   if (!snapshot)
     return (
       <div className="coordinator-browser">
-        <h2>Simulation results</h2>
         <p>{error || "Loading results…"}</p>
       </div>
     );
@@ -249,7 +248,6 @@ function App({ model }: { model: Model }) {
   );
   return (
     <div className="coordinator-browser" ref={browser}>
-      <h2>Simulation results</h2>
       <div className="coordinator-plot-area">
         <div className="coordinator-plot-controls">
           <label>
