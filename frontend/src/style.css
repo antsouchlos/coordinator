@@ -1,0 +1,399 @@
+.coordinator-browser {
+  --line: var(--jp-border-color1, #d6dfe8);
+  --subtle-line: var(--jp-border-color2, #e3e8ed);
+  --text: var(--jp-ui-font-color1, #213143);
+  --muted: var(--jp-ui-font-color2, #667587);
+  --link: var(--jp-content-link-color, #38638a);
+  --surface: var(--jp-layout-color1, #fff);
+  --raised: var(--jp-layout-color2, #f7f9fb);
+  --error: var(--jp-error-color1, #a22);
+  --heading-gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  font: var(--jp-ui-font-size1, 12px) / 1.4
+    var(--jp-ui-font-family, ui-sans-serif, system-ui, sans-serif);
+}
+.coordinator-browser * {
+  box-sizing: border-box;
+}
+.coordinator-browser h2 {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 0 0 16px;
+}
+.coordinator-browser button,
+.coordinator-browser input,
+.coordinator-browser select {
+  font: inherit;
+}
+.coordinator-browser button {
+  cursor: pointer;
+}
+.coordinator-plot-area {
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 28px;
+}
+.coordinator-plot-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+.coordinator-plot-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.coordinator-plot-controls select {
+  min-width: 225px;
+  padding: 4px 6px;
+}
+.coordinator-browser select,
+.coordinator-browser input {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--line);
+}
+.coordinator-plot {
+  width: 100%;
+  height: 600px;
+  min-width: 0;
+}
+.coordinator-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.coordinator-toolbar input {
+  width: min(560px, 75%);
+  min-width: 180px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text);
+}
+.coordinator-toolbar button {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--raised);
+  color: var(--text);
+  padding: 6px 12px;
+}
+.coordinator-summary {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+.coordinator-warnings,
+.coordinator-error {
+  color: var(--error);
+}
+.coordinator-warnings {
+  margin: 8px 0;
+  white-space: pre-wrap;
+}
+.coordinator-card {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  margin: 8px 0;
+  background: var(--surface);
+}
+.coordinator-experiment {
+  border: 2px solid var(--line);
+  padding: 12px 14px;
+  margin: 10px 0;
+}
+.coordinator-attempt {
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  margin: 0 0 8px;
+}
+.coordinator-sweep {
+  border: 1px solid var(--line);
+  padding: 8px;
+  margin: 0 0 8px;
+}
+.coordinator-heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-wrap: wrap;
+  cursor: pointer;
+}
+.coordinator-disclosure {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-align: left;
+}
+.coordinator-disclosure:hover .coordinator-prefix {
+  text-decoration: underline;
+}
+.coordinator-prefix {
+  color: var(--muted);
+  font-weight: 400;
+}
+.coordinator-heading small {
+  font-size: inherit;
+  color: var(--muted);
+  font-weight: 400;
+}
+.coordinator-chevron {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  transform: rotate(0);
+  transition: transform 0.15s ease;
+}
+.coordinator-chevron.closed {
+  transform: rotate(-90deg);
+}
+.coordinator-chevron-button {
+  border: 0;
+  background: none;
+  color: inherit;
+  margin-left: auto;
+  padding: 2px 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.coordinator-card-body {
+  margin-top: var(--heading-gap);
+}
+.coordinator-block-scroll {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  min-width: 0;
+}
+.coordinator-name-group {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  font-weight: 650;
+}
+.coordinator-editable {
+  border: 0;
+  border-bottom: 1px dotted transparent;
+  background: none;
+  color: inherit;
+  padding: 0;
+  font-weight: inherit;
+  white-space: nowrap;
+}
+.coordinator-editable:hover,
+.coordinator-editable:focus {
+  border-bottom-color: currentColor;
+}
+.coordinator-name-input {
+  max-width: 220px;
+  min-width: 100px;
+  font-weight: inherit;
+}
+.coordinator-id {
+  white-space: nowrap;
+}
+.coordinator-delete {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0.55;
+  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  cursor: pointer;
+}
+.coordinator-delete svg {
+  width: 16px;
+  height: 16px;
+}
+.coordinator-delete:hover,
+.coordinator-delete:focus {
+  color: var(--error);
+  opacity: 1;
+}
+.coordinator-inline-error {
+  font-size: inherit;
+  font-weight: 400;
+  margin-left: 5px;
+}
+.coordinator-attempt-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(35%, 420px));
+  gap: 12px;
+  margin-top: var(--heading-gap);
+  width: 100%;
+  min-width: 0;
+}
+.coordinator-attempt-body > :first-child {
+  min-width: 0;
+}
+.coordinator-patch {
+  border: 1px solid var(--line);
+  padding: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  align-self: start;
+}
+.coordinator-patch.closed {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  justify-self: end;
+}
+.coordinator-patch.closed button {
+  height: 100%;
+  justify-content: center;
+}
+.coordinator-patch button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: none;
+  width: 100%;
+  color: inherit;
+  padding: 0;
+}
+.coordinator-patch.closed b {
+  display: none;
+}
+.coordinator-patch-content {
+  max-height: 520px;
+  max-width: 100%;
+  overflow: auto;
+}
+.coordinator-patch pre {
+  width: max-content;
+  min-width: 100%;
+  margin: 8px 0 0;
+  white-space: pre;
+  font: inherit;
+  font-family: var(--jp-code-font-family, ui-monospace, monospace);
+}
+.coordinator-table-outer {
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  margin-top: var(--heading-gap);
+}
+.coordinator-table {
+  font-size: inherit;
+}
+.coordinator-table-head,
+.coordinator-table-row {
+  display: grid;
+  align-items: start;
+}
+.coordinator-table-head > div {
+  min-width: 0;
+  padding: 5px 7px;
+  border-bottom: 2px solid var(--line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 650;
+}
+.coordinator-table-row > div {
+  min-width: 0;
+  min-height: 62px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--subtle-line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.coordinator-table input[type="checkbox"] {
+  vertical-align: middle;
+  margin: 0 5px 0 0;
+  cursor: pointer;
+}
+.coordinator-run-scroll {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.coordinator-run-name label {
+  display: flex;
+  align-items: center;
+}
+.coordinator-run-actions {
+  display: flex;
+  gap: 12px;
+  margin: 3px 0 0 18px;
+}
+.coordinator-run-actions button {
+  border: 0;
+  background: none;
+  color: var(--link);
+  padding: 0;
+  font-size: inherit;
+}
+.coordinator-run-actions button:hover {
+  text-decoration: underline;
+}
+.coordinator-detail {
+  padding: 8px 7px;
+  border-bottom: 1px solid var(--subtle-line);
+  max-width: 100%;
+  overflow: auto;
+}
+.coordinator-detail pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 7px 0;
+}
+.coordinator-detail code {
+  overflow-wrap: anywhere;
+}
+.coordinator-data-scroll {
+  max-height: 350px;
+  overflow: auto;
+}
+.coordinator-data-scroll table {
+  border-collapse: collapse;
+}
+.coordinator-data-scroll th,
+.coordinator-data-scroll td {
+  border: 1px solid var(--line);
+  padding: 3px 7px;
+  white-space: nowrap;
+  text-align: left;
+}
+.coordinator-pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.coordinator-pager button {
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 3px 7px;
+}
+@media (max-width: 850px) {
+  .coordinator-attempt-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .coordinator-patch.closed {
+    justify-self: start;
+  }
+}

@@ -1,5 +1,4 @@
 import json
-import re
 
 import pandas as pd
 import pytest
@@ -186,152 +185,72 @@ def test_attempt_rename_keeps_patch_lookup(tmp_path):
     assert indexed[0].patch_path == renamed / "source.patch"
 
 
-def test_ui_sweep_group_and_selection(tmp_path):
-    pytest.importorskip("ipywidgets")
-    pytest.importorskip("anywidget")
-    run = write_run(tmp_path)
-    from coordinator.browser.ui import launch_results_browser
+def test_react_browser_controller_preserves_settings_and_paths(tmp_path):
+    from coordinator.browser.controller import BrowserController
 
-    dashboard = launch_results_browser(
-        tmp_path, settings_path=tmp_path / "settings.json"
-    )
-    overview = dashboard.children[5]
-    assert "coordinator-sweep" in overview.html
-    overview.request = {
-        "id": 1,
-        "action": "select",
-        "kind": "sweep",
-        "path": str(run.parent),
-        "checked": True,
-    }
-    assert overview.selection["runs"] == [str(run)]
-    overview.request = {
-        "id": 2,
-        "action": "panel",
-        "kind": "sweep",
-        "path": run.parent.relative_to(tmp_path).as_posix(),
-        "open": False,
-    }
-    assert overview.response["ok"] is True
-    assert json.loads((tmp_path / "settings.json").read_text())["panels"]["sweep"] == {
-        run.parent.relative_to(tmp_path).as_posix(): False
-    }
-
-
-@pytest.mark.parametrize("kind", ["attempt", "sweep", "run"])
-def test_ui_result_label_keeps_id_and_settings(tmp_path, kind):
-    pytest.importorskip("ipywidgets")
-    pytest.importorskip("anywidget")
-    from coordinator.browser.ui import launch_results_browser
-
-    run_path = write_run(
-        tmp_path, attempt="aaa1111", sweep="bbb2222", name="ccc3333"
-    )
+    run_path = write_run(tmp_path, patch="diff")
     settings_path = tmp_path / "settings.json"
-    dashboard = launch_results_browser(tmp_path, settings_path=settings_path)
-    overview = dashboard.children[5]
-    path = {"attempt": run_path.parent.parent, "sweep": run_path.parent, "run": run_path}[kind]
-    identity = path.name
+    browser = BrowserController(tmp_path, settings_path)
+    run = run_path.relative_to(tmp_path).as_posix()
+    sweep = run_path.parent.relative_to(tmp_path).as_posix()
+    assert browser.snapshot()["index"]["runs"][0]["path"] == run
+    assert browser.snapshot()["index"]["runs"][0]["has_patch"] is True
 
-    def get_edit_target():
-        match = re.search(
-            rf"<span class='coordinator-editable'[^>]*data-result-id='(\d+)' data-kind='{kind}' data-edit-name='([^']*)'>([^<]*)</span>([^<]*)",
-            overview.html,
-        )
-        assert match is not None
-        return match
+    browser.dispatch("select", {"generation": 0, "kind": "sweep", "path": sweep, "checked": True})
+    browser.dispatch("panel", {"generation": 0, "kind": "data", "path": run, "open": True})
+    assert browser.settings["selected_runs"] == [run]
+    assert browser.settings["panels"]["data"] == {run: True}
+    assert browser.plot()["metrics"] == ["err", "score"]
+    assert browser.content("patch", run_path.parent.parent.relative_to(tmp_path).as_posix())["text"] == "diff"
+    assert browser.content("data", run)["rows"][0] == [1, 3, 0.1]
 
-    initial = get_edit_target()
-    assert initial.group(2) == ""
-    assert initial.group(3) == "Add label"
-    assert initial.group(4) == f" · {identity}"
-    assert f"aria-label='Edit {kind} label'" in overview.html
+    result = browser.dispatch("rename", {"generation": 0, "kind": "sweep", "path": sweep, "name": "comparison"})
+    new_sweep = run_path.parent.with_name("comparison@bbb2222")
+    new_run = (new_sweep / run_path.name).relative_to(tmp_path).as_posix()
+    assert result["snapshot"]["settings"]["selected_runs"] == [new_run]
+    assert browser.settings["panels"]["data"] == {new_run: True}
+    assert json.loads(settings_path.read_text())["selected_runs"] == [new_run]
 
-    overview.request = {
-        "id": 1,
-        "action": "select",
-        "kind": "run",
-        "path": str(run_path),
-        "checked": True,
-    }
-    overview.request = {
-        "id": 2,
-        "action": "panel",
-        "kind": "data",
-        "path": run_path.relative_to(tmp_path).as_posix(),
-        "open": True,
-    }
-    overview.request = {
-        "id": 3,
-        "action": "rename",
-        "target": initial.group(1),
-        "name": "new",
-    }
-    assert overview.response["ok"] is True
+    cleared = browser.dispatch("clear_selection", {"generation": browser.generation})
+    assert cleared["settings"]["selected_runs"] == []
+    assert json.loads(settings_path.read_text())["selected_runs"] == []
+    assert browser.plot()["figure"] is None
 
-    renamed_path = path.with_name(f"new@{identity}")
-    renamed_run = renamed_path / run_path.relative_to(path) if kind != "run" else renamed_path
-    assert renamed_run.is_dir()
-    assert not path.exists()
-    assert overview.selection["runs"] == [str(renamed_run)]
-    settings = json.loads(settings_path.read_text())
-    relative_run = renamed_run.relative_to(tmp_path).as_posix()
-    assert settings["selected_runs"] == [relative_run]
-    assert settings["panels"]["data"] == {relative_run: True}
-    metadata = json.loads((renamed_run / "metadata.json").read_text())
-    assert metadata["attempt_id"] == "aaa1111"
-    assert metadata["sweep_id"] == "bbb2222"
-    assert metadata["run_id"] == "ccc3333"
-
-    labeled = get_edit_target()
-    assert labeled.group(2) == labeled.group(3) == "new"
-    assert labeled.group(4) == f"@{identity}"
-    overview.request = {
-        "id": 4,
-        "action": "rename",
-        "target": labeled.group(1),
-        "name": "changed",
-    }
-    assert overview.response["ok"] is True
-    changed_path = path.with_name(f"changed@{identity}")
-    assert changed_path.is_dir()
-    assert get_edit_target().group(2) == "changed"
-
-    overview.request = {
-        "id": 5,
-        "action": "rename",
-        "target": get_edit_target().group(1),
-        "name": "",
-    }
-    assert overview.response["ok"] is True
-    assert run_path.is_dir()
-    assert overview.selection["runs"] == [str(run_path)]
-    assert get_edit_target().group(4) == f" · {identity}"
-    settings = json.loads(settings_path.read_text())
-    assert settings["selected_runs"] == [run_path.relative_to(tmp_path).as_posix()]
-    assert settings["panels"]["data"] == {
-        run_path.relative_to(tmp_path).as_posix(): True
-    }
+    with pytest.raises(ValueError, match="refreshed"):
+        browser.dispatch("select", {"generation": 0, "kind": "run", "path": run, "checked": True})
+    browser.dispatch("delete", {"generation": browser.generation, "kind": "sweep", "path": new_sweep.relative_to(tmp_path).as_posix()})
+    assert browser.settings["selected_runs"] == []
 
 
-def test_ui_labeled_results_show_fixed_ids(tmp_path):
-    pytest.importorskip("ipywidgets")
-    pytest.importorskip("anywidget")
+def test_large_index_is_metadata_only(tmp_path, monkeypatch):
+    from coordinator.browser.controller import BrowserController
+
+    template = {"axis": "x", "run_params": {"seed": 1}, "sweep_params": {"scale": 2}}
+    sweep = tmp_path / "exp" / "attempt" / "sweep"
+    for number in range(2000):
+        path = sweep / f"run-{number:04d}"
+        path.mkdir(parents=True)
+        (path / "metadata.json").write_text(json.dumps(template))
+        (path / "data.csv").touch()
+    monkeypatch.setattr(pd, "read_csv", lambda *_args, **_kwargs: pytest.fail("CSV loaded during browsing"))
+
+    browser = BrowserController(tmp_path, tmp_path / "settings.json")
+    response = browser.dispatch("boot", {})
+    assert len(response["snapshot"]["index"]["runs"]) == 2000
+    assert browser.dispatch("plot", {"generation": 0})["plot"]["figure"] is None
+    assert not any("metadata" in item for item in response["snapshot"]["index"]["runs"])
+    assert all(not run.metadata for run in browser.index.runs)
+
+
+def test_browser_widget_message_contract(tmp_path, monkeypatch):
     from coordinator.browser.ui import launch_results_browser
 
-    write_run(
-        tmp_path,
-        attempt="try@aaa1111",
-        sweep="comparison@bbb2222",
-        name="curve@ccc3333",
-    )
-    overview = launch_results_browser(
-        tmp_path, settings_path=tmp_path / "settings.json"
-    ).children[5]
-
-    for label, identity in (
-        ("try", "aaa1111"),
-        ("comparison", "bbb2222"),
-        ("curve", "ccc3333"),
-    ):
-        assert f"data-edit-name='{label}'>{label}</span>@{identity}" in overview.html
+    write_run(tmp_path)
+    widget = launch_results_browser(tmp_path, settings_path=tmp_path / "settings.json")
+    sent = []
+    monkeypatch.setattr(widget, "send", lambda message: sent.append(message))
+    widget._handle_message(widget, {"id": 1, "action": "boot", "payload": {}}, [])
+    assert sent[-1]["ok"] and sent[-1]["id"] == 1
+    assert len(sent[-1]["snapshot"]["index"]["runs"]) == 1
+    widget._handle_message(widget, {"id": 2, "action": "select", "payload": {"generation": -1}}, [])
+    assert sent[-1]["ok"] is False
