@@ -10,7 +10,6 @@
   --gruvbox-blue: #458588;
   --gruvbox-gray: #928374;
   --gruvbox-orange: #d65d0e;
-  --gruvbox-purple: #b16286;
   --syntax-add: #79740e;
   --syntax-remove: #cc241d;
   --syntax-header: #458588;
@@ -30,7 +29,6 @@
 body[data-jp-theme-light="false"] .coordinator-browser,
 html[data-jp-theme-light="false"] .coordinator-browser {
   --gruvbox-orange: #fe8019;
-  --gruvbox-purple: #d3869b;
   --syntax-add: #b8bb26;
   --syntax-remove: #fb4934;
   --syntax-header: #83a598;
@@ -142,15 +140,15 @@ html[data-jp-theme-light="false"] .coordinator-browser {
 .coordinator-experiment > .coordinator-heading {
   margin: -12px -14px 0;
   padding: 10px;
-  border-left: 4px solid var(--gruvbox-purple);
+  border-left: 4px solid var(--gruvbox-blue);
   background: var(--raised);
-  background: color-mix(in srgb, var(--gruvbox-purple) 16%, var(--surface));
+  background: color-mix(in srgb, var(--gruvbox-blue) 16%, var(--surface));
 }
 .coordinator-experiment > .coordinator-heading:last-child {
   margin-bottom: -12px;
 }
 .coordinator-experiment > .coordinator-heading .coordinator-prefix {
-  color: var(--gruvbox-purple);
+  color: var(--gruvbox-blue);
   font-weight: 650;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -465,7 +463,7 @@ html[data-jp-theme-light="false"] .coordinator-browser {
 .coordinator-run-actions button {
   border: 0;
   background: none;
-  color: var(--gruvbox-blue);
+  color: var(--gruvbox-orange);
   padding: 0;
   font-size: inherit;
 }
