@@ -9,12 +9,12 @@ import React, {
 import { createRoot } from "react-dom/client";
 import { useBridge } from "./bridge";
 import { ResultsTree } from "./hierarchy";
+import { usePanelToggles } from "./panels";
 import { PlotView } from "./plot";
-import { defaults, parent, plural } from "./types";
+import { parent, plural } from "./types";
 import type {
   Kind,
   Model,
-  PanelKind,
   Plot,
   Response,
   Run,
@@ -205,23 +205,10 @@ function App({ model }: { model: Model }) {
     }
     return result;
   }, [snapshot?.index.runs]);
-  const panelOpen = useCallback(
-    (kind: PanelKind, path: string) =>
-      snapshot?.settings.panels[kind]?.[path] ?? defaults[kind],
-    [snapshot?.settings],
+  const { panelOpen, togglePanel, toggleAllPanels } = usePanelToggles(
+    snapshot,
+    action,
   );
-  const togglePanel = (kind: PanelKind, path: string) => {
-    action("panel", { kind, path, open: !panelOpen(kind, path) }).catch(
-      () => {},
-    );
-  };
-  const toggleAllPanels = (
-    kind: "experiment" | "attempt" | "sweep",
-    path: string,
-    open: boolean,
-  ) => {
-    action("panel_all", { kind, path, open }).catch(() => {});
-  };
   const select = (
     kind: "attempt" | "sweep" | "run",
     path: string,

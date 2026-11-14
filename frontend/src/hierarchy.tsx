@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useRef } from "react";
 import {
   Chevron,
   EditableName,
@@ -74,23 +74,12 @@ function Heading({
   extra: React.ReactNode;
 }) {
   const open = panelOpen(kind, path);
-  const clickTimer = useRef<number | null>(null);
   const firstClickOpen = useRef<boolean | null>(null);
-  useEffect(
-    () => () => {
-      if (clickTimer.current !== null) window.clearTimeout(clickTimer.current);
-    },
-    [],
-  );
   return (
     <div
       className="coordinator-heading"
       onClick={(event) => {
         if (!isHeadingToggleTarget(event.target)) return;
-        if (clickTimer.current !== null) {
-          window.clearTimeout(clickTimer.current);
-          clickTimer.current = null;
-        }
         if (event.detail > 1) return;
         if (event.detail === 0) {
           firstClickOpen.current = null;
@@ -98,18 +87,11 @@ function Heading({
           return;
         }
         firstClickOpen.current = open;
-        clickTimer.current = window.setTimeout(() => {
-          clickTimer.current = null;
-          togglePanel(kind, path);
-        }, 300);
+        togglePanel(kind, path);
       }}
       onDoubleClick={(event) => {
         if (!isHeadingToggleTarget(event.target)) return;
         event.preventDefault();
-        if (clickTimer.current !== null) {
-          window.clearTimeout(clickTimer.current);
-          clickTimer.current = null;
-        }
         toggleAllPanels(kind, path, !(firstClickOpen.current ?? open));
         firstClickOpen.current = null;
       }}

@@ -297,6 +297,26 @@ def test_source_patch_width_persists_and_legacy_settings_load(tmp_path, monkeypa
     assert json.loads(settings_path.read_text())["patch_width"] == 560
 
 
+def test_panel_save_failure_restores_previous_state(tmp_path, monkeypatch):
+    from coordinator.browser.controller import BrowserController
+
+    write_run(tmp_path, experiment="first", attempt="a@1", sweep="s@1", name="r@1")
+    write_run(tmp_path, experiment="second", attempt="b@2", sweep="t@2", name="r@2")
+    browser = BrowserController(tmp_path, tmp_path / "settings.json")
+
+    def failed_save(*_args):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr("coordinator.browser.controller.save_settings", failed_save)
+    single = browser.dispatch("panel", {"generation": 0, "kind": "experiment", "path": "first", "open": False})
+    assert single["settings"]["panels"]["experiment"] == {}
+    assert "disk unavailable" in single["settings_error"]
+
+    bulk = browser.dispatch("panel_all", {"generation": 0, "kind": "experiment", "path": "first", "open": False})
+    assert bulk["settings"]["panels"]["experiment"] == {}
+    assert "disk unavailable" in bulk["settings_error"]
+
+
 def test_large_index_is_metadata_only(tmp_path, monkeypatch):
     from coordinator.browser.controller import BrowserController
 
