@@ -280,7 +280,11 @@ def make_figure(
 
     figure = go.Figure()
 
-    for run, frame in loaded:
+    zero_traces = []
+    has_positive_y = False
+    colors = figure.layout.template.layout.colorway
+
+    for index, (run, frame) in enumerate(loaded):
         if metric not in frame or not pd.api.types.is_numeric_dtype(frame[metric]):
             raise ValueError(f"{run.path}: metric '{metric}' is missing or nonnumeric.")
         if error and (
@@ -293,10 +297,13 @@ def make_figure(
             raise ValueError(f"{run.path}: error bars must be nonnegative.")
         if logx and (frame[axis].dropna() <= 0).any():
             raise ValueError(f"{run.path}: log x requires positive axis values.")
-        if logy and (frame[metric].dropna() <= 0).any():
-            raise ValueError(f"{run.path}: log y requires positive metric values.")
+        if logy and (frame[metric].dropna() < 0).any():
+            raise ValueError(f"{run.path}: log y requires nonnegative metric values.")
 
         ordered = frame.sort_values(axis)
+        zero = ordered[metric].eq(0) if logy else None
+        if logy:
+            has_positive_y |= ordered[metric].gt(0).any()
         plot_name = " / ".join(
             (
                 run.experiment,
@@ -307,13 +314,33 @@ def make_figure(
         )
         figure.add_scatter(
             x=ordered[axis],
-            y=ordered[metric],
+            y=ordered[metric].mask(zero) if logy else ordered[metric],
             mode="lines+markers",
             name=plot_name,
+            line={"color": colors[index % len(colors)]} if logy else None,
+            marker={"color": colors[index % len(colors)]} if logy else None,
             error_y={"type": "data", "array": ordered[error], "visible": True}
             if error
             else None,
         )
+        if logy and zero.any():
+            zero_traces.append(
+                go.Scatter(
+                    x=ordered.loc[zero, axis],
+                    y=[0] * int(zero.sum()),
+                    yaxis="y2",
+                    mode="markers",
+                    name=plot_name,
+                    showlegend=False,
+                    marker={"symbol": "x", "size": 11, "color": colors[index % len(colors)]},
+                    hovertemplate=(
+                        f"{axis}: %{{x}}<br>{metric}: 0<br>"
+                        "Zero is not shown on the log Y axis<extra>%{fullData.name}</extra>"
+                    ),
+                )
+            )
+
+    figure.add_traces(zero_traces)
 
     figure.update_layout(
         xaxis_title=axis,
@@ -363,5 +390,29 @@ def make_figure(
                 "ticklen": 3,
             },
         )
+        if zero_traces:
+            figure.update_layout(
+                xaxis={"anchor": "y2"},
+                yaxis={"domain": [0.17, 1]},
+                yaxis2={
+                    "domain": [0, 0.09],
+                    "range": [-1, 1],
+                    "fixedrange": True,
+                    "tickvals": [0],
+                    "ticktext": ["0"],
+                    "title": "Zero values",
+                    "showgrid": False,
+                    "zeroline": False,
+                },
+            )
+        if not has_positive_y:
+            figure.update_layout(
+                yaxis={"range": [0, 1], "showticklabels": False, "showgrid": False}
+            )
+            figure.add_annotation(
+                x=0.5, y=0.6, xref="paper", yref="paper",
+                text="No positive values to display on a log scale",
+                showarrow=False,
+            )
 
     return figure

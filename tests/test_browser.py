@@ -145,6 +145,73 @@ def test_plot_uses_labels_without_ids(tmp_path):
     }
 
 
+def test_log_y_marks_zero_values_below_positive_curves(tmp_path):
+    first = write_run(tmp_path, name="first")
+    second = write_run(tmp_path, name="second")
+    pd.DataFrame({"noise": [3, 1, 2], "score": [4, 2, 0]}).to_csv(
+        first / "data.csv", index=False
+    )
+    pd.DataFrame({"noise": [1, 2, 3], "score": [0, 3, 0]}).to_csv(
+        second / "data.csv", index=False
+    )
+    axis, loaded, _ = load_selected(scan_results(tmp_path)[0])
+
+    figure = make_figure(axis, loaded, "score", logy=True)
+
+    assert figure.layout.yaxis.type == "log"
+    assert figure.layout.yaxis.domain == (0.17, 1)
+    assert figure.layout.yaxis2.domain == (0, 0.09)
+    assert figure.layout.xaxis.anchor == "y2"
+    assert len(figure.data) == 4
+    curves = {trace.name.rsplit(" / ", 1)[-1]: trace for trace in figure.data[:2]}
+    zeros = {trace.name.rsplit(" / ", 1)[-1]: trace for trace in figure.data[2:]}
+    assert list(curves["first"].x) == [1, 2, 3]
+    assert pd.isna(curves["first"].y[1])
+    assert list(curves["second"].y)[1] == 3
+    assert pd.isna(curves["second"].y[0]) and pd.isna(curves["second"].y[2])
+    assert list(zeros["first"].x) == [2]
+    assert list(zeros["second"].x) == [1, 3]
+    assert all(list(trace.y) == [0] * len(trace.x) for trace in zeros.values())
+    assert all(trace.yaxis == "y2" and trace.showlegend is False for trace in zeros.values())
+    assert all(curves[name].line.color == marker.marker.color for name, marker in zeros.items())
+    assert all("score: 0" in marker.hovertemplate for marker in zeros.values())
+
+
+def test_log_y_all_zero_values_remain_visible_in_browser(tmp_path):
+    path = write_run(tmp_path)
+    pd.DataFrame({"noise": [1, 2], "score": [0, 0]}).to_csv(
+        path / "data.csv", index=False
+    )
+    from coordinator.browser.controller import BrowserController
+
+    browser = BrowserController(tmp_path, tmp_path / "settings.json")
+    browser.settings["selected_runs"] = [path.relative_to(tmp_path).as_posix()]
+    browser.settings["plot"] = {"metric": "score", "logx": False, "logy": True}
+
+    result = browser.plot()
+
+    assert result["error"] is None
+    figure = result["figure"]
+    assert figure["layout"]["yaxis"]["type"] == "log"
+    assert figure["layout"]["yaxis2"]["range"] == [-1, 1]
+    assert figure["layout"]["yaxis2"].get("showticklabels") is not False
+    assert figure["data"][1]["y"] == [0, 0]
+    assert figure["data"][1]["yaxis"] == "y2"
+    assert "No positive values" in figure["layout"]["annotations"][0]["text"]
+
+
+def test_log_y_still_rejects_negative_values(tmp_path):
+    path = write_run(tmp_path)
+    pd.DataFrame({"noise": [1, 2], "score": [0, -1]}).to_csv(
+        path / "data.csv", index=False
+    )
+    axis, loaded, _ = load_selected(scan_results(tmp_path)[0])
+
+    with pytest.raises(ValueError, match="log y requires nonnegative"):
+        make_figure(axis, loaded, "score", logy=True)
+    assert list(make_figure(axis, loaded, "score").data[0].y) == [0, -1]
+
+
 def test_sweep_rename_delete_and_settings_paths(tmp_path):
     run = write_run(tmp_path)
     root = tmp_path

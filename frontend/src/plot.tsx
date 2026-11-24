@@ -59,6 +59,7 @@ function themedLayout(element: HTMLElement, original: Record<string, unknown>) {
     font: { ...record(original.font), color: text },
     xaxis: axis(original.xaxis),
     yaxis: axis(original.yaxis),
+    ...(original.yaxis2 ? { yaxis2: axis(original.yaxis2) } : {}),
     hoverlabel: {
       ...record(original.hoverlabel),
       bgcolor: raised,
