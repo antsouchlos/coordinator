@@ -145,6 +145,32 @@ def test_plot_uses_labels_without_ids(tmp_path):
     }
 
 
+@pytest.mark.parametrize(
+    ("paths", "prefix_length"),
+    [
+        (["exp/Attempt1/Sweep1/Run1", "exp/Attempt2/Sweep2/Run1"], 1),
+        (["exp/Attempt1/Sweep1/Run1", "exp/Attempt1/Sweep2/Run1"], 2),
+        (["exp/Attempt1/Sweep1/Run1", "exp2/Attempt1/Sweep1/Run1"], 0),
+        (["exp/Attempt1/Sweep1/Run1"], 3),
+        (["exp/Attempt1/Sweep1/Run1@a", "exp/Attempt1/Sweep1/Run1@b"], 3),
+    ],
+)
+def test_plot_omits_shared_path_components_from_hover(tmp_path, paths, prefix_length):
+    written = [write_run(tmp_path, *path.split("/")) for path in paths]
+    runs = {run.path: run for run in scan_results(tmp_path)[0]}
+    axis, loaded, _ = load_selected([runs[path] for path in written])
+
+    figure = make_figure(axis, loaded, "score")
+
+    assert figure.layout.hoverlabel.namelength == 30
+    assert len(figure.data) == len(paths)
+    for trace, path in zip(figure.data, paths):
+        components = path.split("@")[0].split("/")
+        assert trace.name == " / ".join(components)
+        assert trace.meta == " / ".join(components[prefix_length:])
+        assert trace.hovertemplate == "(%{x}, %{y})<extra>%{meta}</extra>"
+
+
 def test_plot_cycles_styles_within_hierarchy(tmp_path):
     first_sweep = [
         write_run(tmp_path, sweep="sweep@0", name=f"run@{index:02}")
@@ -188,7 +214,25 @@ def test_plot_cycles_styles_within_hierarchy(tmp_path):
     assert figure.layout.legend.traceorder == "grouped"
 
 
-def test_log_y_marks_zero_values_below_positive_curves(tmp_path):
+@pytest.mark.parametrize(
+    ("logx", "logy", "coordinates"),
+    [
+        (True, False, "(%{x:.2~e}, %{y})"),
+        (False, True, "(%{x}, %{y:.2~e})"),
+        (True, True, "(%{x:.2~e}, %{y:.2~e})"),
+    ],
+)
+def test_plot_formats_hover_coordinates_on_log_axes(tmp_path, logx, logy, coordinates):
+    write_run(tmp_path)
+    axis, loaded, _ = load_selected(scan_results(tmp_path)[0])
+
+    figure = make_figure(axis, loaded, "score", logx=logx, logy=logy)
+
+    assert figure.data[0].hovertemplate == coordinates + "<extra>%{meta}</extra>"
+
+
+@pytest.mark.parametrize("logx", [False, True])
+def test_log_y_marks_zero_values_below_positive_curves(tmp_path, logx):
     first = write_run(tmp_path, name="first")
     second = write_run(tmp_path, name="second")
     pd.DataFrame({"noise": [3, 1, 2], "score": [4, 2, 0]}).to_csv(
@@ -199,7 +243,7 @@ def test_log_y_marks_zero_values_below_positive_curves(tmp_path):
     )
     axis, loaded, _ = load_selected(scan_results(tmp_path)[0])
 
-    figure = make_figure(axis, loaded, "score", logy=True)
+    figure = make_figure(axis, loaded, "score", logx=logx, logy=True)
 
     assert figure.layout.yaxis.type == "log"
     assert figure.layout.yaxis.domain == (0.17, 1)
@@ -218,6 +262,10 @@ def test_log_y_marks_zero_values_below_positive_curves(tmp_path):
     assert all(trace.yaxis == "y2" and trace.showlegend is False for trace in zeros.values())
     assert all(curves[name].line.color == marker.marker.color for name, marker in zeros.items())
     assert all("score: 0" in marker.hovertemplate for marker in zeros.values())
+    for name, marker in zeros.items():
+        assert marker.meta == curves[name].meta == name
+        assert marker.hovertemplate.startswith("noise: %{x:.2~e}" if logx else "noise: %{x}")
+        assert marker.hovertemplate.endswith("<extra>%{meta}</extra>")
 
 
 def test_log_y_all_zero_values_remain_visible_in_browser(tmp_path):

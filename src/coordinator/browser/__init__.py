@@ -4,6 +4,7 @@ import shutil
 import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 
 import pandas as pd
@@ -290,7 +291,26 @@ def make_figure(
     sweeps_by_attempt: dict[Path, dict[Path, int]] = defaultdict(dict)
     attempts_by_experiment: dict[Path, dict[Path, int]] = defaultdict(dict)
 
-    for run, frame in loaded:
+    plot_name_parts = [
+        (
+            run.experiment,
+            _get_plot_name(run.path.parent.parent),
+            _get_plot_name(run.path.parent),
+            _get_plot_name(run.path),
+        )
+        for run, _ in loaded
+    ]
+    shared_prefix_length = 0
+    for components in zip(*(parts[:-1] for parts in plot_name_parts)):
+        if len(set(components)) != 1:
+            break
+        shared_prefix_length += 1
+
+    hover_x = "%{x:.2~e}" if logx else "%{x}"
+    hover_y = "%{y:.2~e}" if logy else "%{y}"
+    hover_coordinates = f"({hover_x}, {hover_y})"
+    hover_extra = "<extra>%{meta}</extra>"
+    for (run, frame), name_parts in zip(loaded, plot_name_parts):
         if metric not in frame or not pd.api.types.is_numeric_dtype(frame[metric]):
             raise ValueError(f"{run.path}: metric '{metric}' is missing or nonnumeric.")
         if error and (
@@ -317,19 +337,15 @@ def make_figure(
         color = colors[runs.setdefault(run.path, len(runs)) % len(colors)]
         dash = dashes[sweeps.setdefault(sweep_path, len(sweeps)) % len(dashes)]
         symbol = symbols[attempts.setdefault(attempt_path, len(attempts)) % len(symbols)]
-        plot_name = " / ".join(
-            (
-                run.experiment,
-                _get_plot_name(attempt_path),
-                _get_plot_name(sweep_path),
-                _get_plot_name(run.path),
-            )
-        )
+        plot_name = " / ".join(name_parts)
+        hover_label = escape(" / ".join(name_parts[shared_prefix_length:]))
         figure.add_scatter(
             x=ordered[axis],
             y=ordered[metric].mask(zero) if logy else ordered[metric],
             mode="lines+markers",
             name=plot_name,
+            meta=hover_label,
+            hovertemplate=hover_coordinates + hover_extra,
             legendgroup=str(experiment_path),
             legendgrouptitle_text=run.experiment,
             line={"color": color, "dash": dash},
@@ -346,11 +362,12 @@ def make_figure(
                     yaxis="y2",
                     mode="markers",
                     name=plot_name,
+                    meta=hover_label,
                     showlegend=False,
                     marker={"symbol": "x", "size": 11, "color": color},
                     hovertemplate=(
-                        f"{axis}: %{{x}}<br>{metric}: 0<br>"
-                        "Zero is not shown on the log Y axis<extra>%{fullData.name}</extra>"
+                        f"{escape(axis)}: {hover_x}<br>{escape(metric)}: 0<br>"
+                        "Zero is not shown on the log Y axis" + hover_extra
                     ),
                 )
             )
@@ -364,6 +381,7 @@ def make_figure(
         yaxis_type="log" if logy else "linear",
         autosize=True,
         hovermode="closest",
+        hoverlabel={"namelength": 30},
         legend_title="Runs",
         legend={
             "groupclick": "toggleitem",
