@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import tempfile
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -278,13 +279,18 @@ def make_figure(
 ):
     import plotly.graph_objects as go
 
-    figure = go.Figure()
+    figure = go.Figure(layout={"template": "plotly_white"})
 
     zero_traces = []
     has_positive_y = False
     colors = figure.layout.template.layout.colorway
+    dashes = ("solid", "dash", "dot", "dashdot", "longdash", "longdashdot")
+    symbols = ("circle", "square", "diamond", "triangle-up", "triangle-down", "hexagon")
+    runs_by_sweep: dict[Path, dict[Path, int]] = defaultdict(dict)
+    sweeps_by_attempt: dict[Path, dict[Path, int]] = defaultdict(dict)
+    attempts_by_experiment: dict[Path, dict[Path, int]] = defaultdict(dict)
 
-    for index, (run, frame) in enumerate(loaded):
+    for run, frame in loaded:
         if metric not in frame or not pd.api.types.is_numeric_dtype(frame[metric]):
             raise ValueError(f"{run.path}: metric '{metric}' is missing or nonnumeric.")
         if error and (
@@ -304,11 +310,18 @@ def make_figure(
         zero = ordered[metric].eq(0) if logy else None
         if logy:
             has_positive_y |= ordered[metric].gt(0).any()
+        sweep_path, attempt_path, experiment_path = run.path.parents[:3]
+        runs = runs_by_sweep[sweep_path]
+        sweeps = sweeps_by_attempt[attempt_path]
+        attempts = attempts_by_experiment[experiment_path]
+        color = colors[runs.setdefault(run.path, len(runs)) % len(colors)]
+        dash = dashes[sweeps.setdefault(sweep_path, len(sweeps)) % len(dashes)]
+        symbol = symbols[attempts.setdefault(attempt_path, len(attempts)) % len(symbols)]
         plot_name = " / ".join(
             (
                 run.experiment,
-                _get_plot_name(run.path.parent.parent),
-                _get_plot_name(run.path.parent),
+                _get_plot_name(attempt_path),
+                _get_plot_name(sweep_path),
                 _get_plot_name(run.path),
             )
         )
@@ -317,8 +330,10 @@ def make_figure(
             y=ordered[metric].mask(zero) if logy else ordered[metric],
             mode="lines+markers",
             name=plot_name,
-            line={"color": colors[index % len(colors)]} if logy else None,
-            marker={"color": colors[index % len(colors)]} if logy else None,
+            legendgroup=str(experiment_path),
+            legendgrouptitle_text=run.experiment,
+            line={"color": color, "dash": dash},
+            marker={"color": color, "symbol": symbol},
             error_y={"type": "data", "array": ordered[error], "visible": True}
             if error
             else None,
@@ -332,7 +347,7 @@ def make_figure(
                     mode="markers",
                     name=plot_name,
                     showlegend=False,
-                    marker={"symbol": "x", "size": 11, "color": colors[index % len(colors)]},
+                    marker={"symbol": "x", "size": 11, "color": color},
                     hovertemplate=(
                         f"{axis}: %{{x}}<br>{metric}: 0<br>"
                         "Zero is not shown on the log Y axis<extra>%{fullData.name}</extra>"
@@ -349,9 +364,10 @@ def make_figure(
         yaxis_type="log" if logy else "linear",
         autosize=True,
         hovermode="closest",
-        template="plotly_white",
         legend_title="Runs",
         legend={
+            "groupclick": "toggleitem",
+            "traceorder": "grouped",
             "orientation": "h",
             "x": 0.5,
             "xanchor": "center",

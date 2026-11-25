@@ -145,6 +145,49 @@ def test_plot_uses_labels_without_ids(tmp_path):
     }
 
 
+def test_plot_cycles_styles_within_hierarchy(tmp_path):
+    first_sweep = [
+        write_run(tmp_path, sweep="sweep@0", name=f"run@{index:02}")
+        for index in range(11)
+    ]
+    other_sweeps = [
+        write_run(tmp_path, sweep=f"sweep@{index}") for index in range(1, 7)
+    ]
+    other_attempts = [
+        write_run(tmp_path, attempt=f"try@{index}", sweep="sweep@0")
+        for index in range(1, 7)
+    ]
+    other_experiment = write_run(tmp_path, experiment="other", sweep="sweep@0")
+    runs = {run.path: run for run in scan_results(tmp_path)[0]}
+    paths = [*first_sweep, *other_sweeps, *other_attempts, other_experiment]
+    axis, loaded, _ = load_selected([runs[path] for path in paths])
+
+    figure = make_figure(axis, loaded, "score")
+    traces = dict(zip(paths, figure.data))
+    first = traces[first_sweep[0]]
+    assert len({traces[path].line.color for path in first_sweep[:10]}) == 10
+    assert traces[first_sweep[-1]].line.color == first.line.color
+    assert {traces[path].line.dash for path in first_sweep} == {"solid"}
+    assert [traces[path].line.dash for path in other_sweeps] == [
+        "dash", "dot", "dashdot", "longdash", "longdashdot", "solid",
+    ]
+    assert all(traces[path].line.color == first.line.color for path in other_sweeps)
+    assert {traces[path].marker.symbol for path in first_sweep + other_sweeps} == {"circle"}
+    assert [traces[path].marker.symbol for path in other_attempts] == [
+        "square", "diamond", "triangle-up", "triangle-down", "hexagon", "circle",
+    ]
+    assert {traces[path].line.dash for path in other_attempts} == {"solid"}
+    assert all(trace.line.color == trace.marker.color for trace in figure.data)
+    assert all(traces[path].legendgroup == first.legendgroup for path in paths[:-1])
+    assert first.legendgrouptitle.text == "exp"
+    other = traces[other_experiment]
+    assert other.marker.symbol == first.marker.symbol
+    assert other.legendgroup != first.legendgroup
+    assert other.legendgrouptitle.text == "other"
+    assert figure.layout.legend.groupclick == "toggleitem"
+    assert figure.layout.legend.traceorder == "grouped"
+
+
 def test_log_y_marks_zero_values_below_positive_curves(tmp_path):
     first = write_run(tmp_path, name="first")
     second = write_run(tmp_path, name="second")
